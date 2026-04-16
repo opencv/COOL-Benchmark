@@ -1,0 +1,74 @@
+            <div class="benchmark-grid">
+                <div class="benchmark-option">
+                    <h3>1. Optimized Graviton</h3>
+                    <p>AWS Marketplace optimized OpenCV (Graviton2 only)</p>
+                    <select class="instance-type" data-test="optimized-graviton">
+                        <option value="m6g.large">m6g.large (Graviton2)</option>
+                        <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
+                        <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
+                        <option value="c6g.large">c6g.large (Graviton2)</option>
+                        <option value="c6g.xlarge">c6g.xlarge (Graviton2)</option>
+                    </select>
+                    <button class="run-test" data-test="optimized-graviton">Run Test</button>
+                </div>
+
+                <div class="benchmark-option">
+                    <h3>2. Unoptimized Graviton</h3>
+                    <p>Test OpenCV on Graviton (all generations)</p>
+                    <div class="build-mode-selector">
+                        <label>
+                            <input type="radio" name="graviton-build-mode" value="pip" checked>
+                            Quick (pip install) - ~2 min
+                        </label>
+                        <label>
+                            <input type="radio" name="graviton-build-mode" value="compile">
+                            Build from source - ~30-45 min
+                        </label>
+                    </div>
+                    <select class="instance-type" data-test="unoptimized-graviton">
+                        <option value="m7g.large">m7g.large (Graviton3)</option>
+                        <option value="m7g.xlarge">m7g.xlarge (Graviton3)</option>
+                        <option value="m6g.large">m6g.large (Graviton2)</option>
+                        <option value="c7g.large">c7g.large (Graviton3)</option>
+                        <option value="c6g.large">c6g.large (Graviton2)</option>
+                    </select>
+                    <button class="run-test" data-test="unoptimized-graviton">Run Test</button>
+                </div>
+
+                <div class="benchmark-option">
+                    <h3>3. Unoptimized x86</h3>
+                    <p>Test OpenCV on Intel x86</p>
+                    <div class="build-mode-selector">
+                        <label>
+                            <input type="radio" name="x86-build-mode" value="pip" checked>
+                            Quick (pip install) - ~2 min
+                        </label>
+                        <label>
+                            <input type="radio" name="x86-build-mode" value="compile">
+                            Build from source - ~30-45 min
+                        </label>
+                    </div>
+                    <select class="instance-type" data-test="unoptimized-x86">
+                        <option value="m7i.large">m7i.large (Intel)</option>
+                        <option value="m7i.xlarge">m7i.xlarge (Intel)</option>
+                        <option value="c7i.large">c7i.large (Intel)</option>
+                        <option value="m6i.large">m6i.large (Intel)</option>
+                        <option value="c6i.large">c6i.large (Intel)</option>
+                    </select>
+                    <button class="run-test" data-test="unoptimized-x86">Run Test</button>
+                </div>
+
+                <div class="benchmark-option">
+                    <h3>4. Parallel Graviton Auto-Scale</h3>
+                    <p>Multiple parallel Graviton instances (Marketplace AMI only)</p>
+                    <div class="parallel-config">
+                        <label>Max Instances: <input type="number" id="max-instances" value="5" min="1" max="20"></label>
+                        <select class="instance-type" data-test="parallel-graviton">
+                            <option value="m6g.large">m6g.large (Graviton2)</option>
+                            <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
+                            <option value="c6g.large">c6g.large (Graviton2)</option>
+                        </select>
+                    </div>
+                    <button class="run-test" data-test="parallel-graviton">Run Parallel Test</button>
+                </div>
+            </div>

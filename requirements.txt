@@ -1,0 +1,19 @@
+# Core async web framework (orchestrator backend)
+aiohttp>=3.9.0
+
+# AWS SDK (instance management)
+boto3>=1.34.0
+
+# Anthropic SDK (auto-retry AI analysis)
+anthropic>=0.25.0
+
+# MCP agent protocol
+mcp>=1.0.0
+
+# Image processing (benchmark pipeline)
+opencv-python>=4.8.0
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# HTML parsing (image search agent)
+beautifulsoup4>=4.12.0

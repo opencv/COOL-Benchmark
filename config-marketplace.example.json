@@ -1,0 +1,30 @@
+{
+  "marketplace": {
+    "ami_id": "ami-xxxxxxxxxxxxxxxxx",
+    "product_code": "your-marketplace-product-code",
+    "license_key": "configured",
+    "license_type": "per_instance",
+    "supported_instance_types": [
+      "m6g.large",
+      "m6g.xlarge",
+      "m6g.2xlarge",
+      "c6g.large",
+      "c6g.xlarge"
+    ],
+    "notes": "License key may be per-instance or account-wide depending on vendor"
+  },
+  "license_configuration": {
+    "method": "environment_variable",
+    "variable_name": "OPENCV_LICENSE_KEY",
+    "alternative_methods": [
+      "config_file",
+      "ssm_parameter",
+      "secrets_manager"
+    ]
+  },
+  "vendor_info": {
+    "name": "To be determined",
+    "support_url": "https://aws.amazon.com/marketplace/",
+    "documentation_url": "Check marketplace listing"
+  }
+}

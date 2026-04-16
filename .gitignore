@@ -1,0 +1,61 @@
+# Dependencies
+node_modules/
+*.egg-info/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+cool/
+
+# CDK
+cdk/cdk.out/
+cdk/node_modules/
+*.d.ts
+
+# AWS
+.aws/
+*.pem
+opencv-ami-id.txt
+deployment-info.json
+config.json
+config-marketplace.json
+cdk/cdk.context.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# Build outputs
+dist/
+build/
+*.tar.gz
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

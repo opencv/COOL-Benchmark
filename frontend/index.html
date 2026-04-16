@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>OpenCV Graviton Performance Benchmark</title>
+    <script>
+        // Cache busting - add timestamp to CSS and JS loads
+        (function() {
+            const timestamp = new Date().getTime();
+            
+            // Load CSS with cache busting
+            const link = document.createElement('link');
+            link.rel = 'stylesheet';
+            link.href = `styles.css?v=${timestamp}`;
+            document.head.appendChild(link);
+            
+            // Load JS with cache busting (will be added at end of body)
+            window.cacheBustTimestamp = timestamp;
+        })();
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>"COOL" OpenCV Graviton performance benchmarks</h1>
+            <p>Demonstrating OpenCV performance optimizations on AWS Graviton processors</p>
+        </header>
+
+        <section class="status-panel">
+            <h2>System Status</h2>
+            <div class="backend-switcher">
+                <label class="switch-label">
+                    <span class="switch-text">Local OpenCV Execution (DEBUG):</span>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="backend-toggle" checked>
+                        <span class="toggle-slider"></span>
+                    </div>
+                    <span id="backend-mode-label" class="mode-label">Cloud Mode</span>
+                </label>
+                <div class="mode-description" id="mode-description">
+                    Using real AWS EC2 instances for benchmarking
+                </div>
+            </div>
+            <div class="status-grid">
+                <div class="status-item">
+                    <span class="status-label">Local Backend Status:</span>
+                    <span id="backend-mode" class="status-value mode-indicator">Checking...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Orchestrator API:</span>
+                    <span id="opencv-status" class="status-value">Checking...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">OpenCV EC2 Instances:</span>
+                    <span id="mcp-status" class="status-value">Checking...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Available Functions (excerpt):</span>
+                    <span id="graviton-functions" class="status-value">Loading...</span>
+                </div>
+                <div class="status-item">
+                    <span class="status-label">Notifications:</span>
+                    <button id="toggle-sounds-btn" class="sound-toggle-btn">🔊 Sounds On</button>
+                </div>
+            </div>
+            
+            <div class="status-actions" style="text-align: center; margin: 20px 0;">
+                <button id="stop-all-benchmarks-top" class="stop-button" title="Stop all running benchmarks and terminate EC2 instances">
+                    🛑 Stop All Benchmarks
+                </button>
+            </div>
+            
+            <div class="config-section">
+                <h3>Configuration</h3>
+                <div class="config-grid">
+                    <div class="config-item">
+                        <label for="claude-api-key">Claude API Key (for auto-retry):</label>
+                        <input type="text" id="claude-api-key" value="" placeholder="sk-ant-api03-..." />
+                        <small>Used by auto-retry feature to analyze and fix build errors</small>
+                    </div>
+                    <div class="config-item">
+                        <label for="marketplace-ami-id">AWS Marketplace OpenCV AMI ID:</label>
+                        <input type="text" id="marketplace-ami-id" value="ami-0b775ed8c83396c73" placeholder="ami-xxxxxxxxx" />
+                        <small>For options 1 & 4 (COOL & Parallel)</small>
+                    </div>
+                </div>
+                <button id="save-config-btn" class="save-config-btn">💾 Save Configuration</button>
+                <small style="display: block; margin-top: 8px; color: #64748b; font-size: 11px;">
+                    Configuration is saved to browser localStorage and sent to backend server
+                </small>
+            </div>
+        </section>
+
+        <section class="prompts-panel">
+            <h2>Image Collection Prompts</h2>
+            <div class="prompt-buttons">
+                <input type="text" class="prompt-input" id="prompt-1" value="Locate and upload in volatile memory 1000 public images of human cells in high resolution" />
+                <button class="prompt-btn" data-prompt-input="prompt-1">
+                    Execute Sample Prompt 1
+                </button>
+                <input type="text" class="prompt-input" id="prompt-2" value="Locate and upload in volatile memory 1000 high-resolution images from the NASA Mars Pathfinder mission" />
+                <button class="prompt-btn" data-prompt-input="prompt-2">
+                    Execute Sample Prompt 2
+                </button>
+            </div>
+            <div class="search-config">
+                <label>Search Timeout (seconds): 
+                    <input type="number" id="search-timeout" value="30" min="5" max="300" title="How long to search for images across concurrent threads">
+                </label>
+                <label>Min Images: 
+                    <input type="number" id="min-images" value="50" min="1" max="10000" title="Minimum number of images to find before stopping (even if timeout not reached)">
+                </label>
+                <span class="config-hint">Search continues until timeout OR min images reached</span>
+            </div>
+            <div class="custom-prompt">
+                <textarea id="custom-prompt" placeholder="Enter custom image search prompt..."></textarea>
+                <button id="custom-submit">Execute Custom Prompt</button>
+            </div>
+        </section>
+
+        <section class="agent-communication">
+            <h2>AWS AgentCore Agent & Tool Activation</h2>
+            <div class="communication-diagram">
+                <div class="agent-node" id="frontend-agent">
+                    <div class="agent-icon">🌐</div>
+                    <div class="agent-label">Frontend Agent (runs locally on port 3000 by default)</div>
+                    <div class="agent-status">Ready</div>
+                </div>
+                
+                <div class="communication-flow" id="flow-1">
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-label">Image Search Request</div>
+                </div>
+                
+                <div class="agent-node" id="search-agent">
+                    <div class="agent-icon">🔍</div>
+                    <div class="agent-label">Image Search Agent (runs with local)</div>
+                    <div class="agent-status">Idle</div>
+                    <div class="agent-tools">
+                        <span class="tool" id="tool-web-scraper">Web Scraper</span>
+                        <span class="tool" id="tool-nasa-api">NASA API</span>
+                        <span class="tool" id="tool-image-validator">Image Validator</span>
+                    </div>
+                </div>
+                
+                <div class="communication-flow" id="flow-2">
+                    <div class="flow-arrow">↓</div>
+                    <div class="flow-label">MCP Protocol</div>
+                </div>
+                
+                <div class="agent-node" id="orchestrator-agent">
+                    <div class="agent-icon">🎼</div>
+                    <div class="agent-label">Orchestrator Agent (runs with local server)</div>
+                    <div class="agent-status">Ready</div>
+                    <div class="agent-tools">
+                        <span class="tool" id="tool-instance-manager">Instance Manager</span>
+                        <span class="tool" id="tool-build-manager">Build Manager</span>
+                        <span class="tool" id="tool-benchmark-executor">Benchmark Executor</span>
+                        <span class="tool" id="tool-cost-tracker">Cost Tracker</span>
+                    </div>
+                </div>
+                
+                <div class="communication-flow" id="flow-3">
+                    <div class="flow-arrow">→</div>
+                    <div class="flow-label">EC2 Launch</div>
+                </div>
+                
+                <div class="agent-node" id="opencv-agent">
+                    <div class="agent-icon">🖼️</div>
+                    <div class="agent-label">OpenCV MCP library/tool wrapper Agent (runs remotely)</div>
+                    <div class="agent-status">Ready</div>
+                    <div class="agent-tools">
+                        <span class="tool" id="tool-resize">resize()</span>
+                        <span class="tool" id="tool-findcontours">findContours()</span>
+                        <span class="tool" id="tool-graviton-opt">Graviton Opt</span>
+                    </div>
+                </div>
+                
+                <div class="communication-flow" id="flow-4">
+                    <div class="flow-arrow">↑</div>
+                    <div class="flow-label">Results</div>
+                </div>
+            </div>
+            
+            <div class="communication-log">
+                <h3>Log</h3>
+                <div id="comm-log" class="log-container">
+                    <div class="log-entry">System initialized - All agents ready</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="image-status">
+            <h2>Image Collection Status</h2>
+            <div id="image-collection-status">
+                <p>No images loaded yet. Select a prompt above to begin.</p>
+            </div>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill"></div>
+            </div>
+            
+            <div class="live-image-preview" style="display: none;" id="live-preview-section">
+                <h3>Live Image Preview</h3>
+                <div id="current-image-display" class="current-image-display">
+                    <div class="current-image-placeholder">Images will appear here as they're loaded...</div>
+                </div>
+                <div class="preview-stats">
+                    <span id="preview-count">0</span> images loaded
+                    <span class="preview-separator">•</span>
+                    <span id="preview-rate">0</span> images/sec
+                    <span class="preview-separator">•</span>
+                    <span id="current-image-info">Ready</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="benchmark-panel">
+            <h2>Benchmarking Tasks</h2>
+            <div class="global-config">
+                <label>Processing Iterations: 
+                    <input type="number" id="processing-iterations" value="1" min="1" max="10000" title="Number of times to repeat processing for more accurate cost calculation">
+                </label>
+                <span class="config-hint">Higher iterations = more accurate cost estimates</span>
+                <button id="stop-all-benchmarks" class="stop-button" title="Stop all running benchmarks and terminate EC2 instances">
+                    🛑 Stop All Benchmarks
+                </button>
+            </div>
+            <div class="pipeline-selector" style="margin: 20px 0; padding: 15px; background: #edf2f7; border-radius: 8px; border-left: 4px solid #4299e1;">
+                <label for="benchmark-pipeline" style="font-weight: 600; color: #2d3748; display: block; margin-bottom: 8px;">🔬 Benchmark Pipeline:</label>
+                <select id="benchmark-pipeline" style="padding: 10px 14px; border-radius: 6px; border: 1px solid #cbd5e0; font-size: 1em; width: 100%; max-width: 500px; background: white; cursor: pointer;">
+                    <option value="standard" selected>Standard (Resize + Contours)</option>
+                    <option value="augmentation">Augmentation (Rotate + Resize 2x + Blur)</option>
+                    <option value="analysis">Analysis (CLAHE + Hough Circles + Contours)</option>
+                </select>
+                <span class="config-hint" style="display: block; margin-top: 8px; color: #718096; font-size: 0.85em;" id="pipeline-description">
+                    Select which OpenCV workload to benchmark across all options below
+                </span>
+            </div>
+            <div class="benchmark-grid">
+                <div class="benchmark-option">
+                    <h3>1. COOL for Graviton (AWS Marketplace)</h3>
+                    <p>Run using AWS Marketplace optimized OpenCV (Graviton2 only)</p>
+                    <div class="license-input-group">
+                        <label for="marketplace-ami-id-option1">AWS Marketplace OpenCV AMI ID:</label>
+                        <input type="text" id="marketplace-ami-id-option1" value="ami-0b775ed8c83396c73" placeholder="ami-xxxxxxxxx" />
+                        <small>AMI ID for the marketplace OpenCV image</small>
+                    </div>
+                    <div class="license-input-group">
+                        <label for="marketplace-license-key">AWS Marketplace License Key:</label>
+                        <input type="text" id="marketplace-license-key" placeholder="Enter license key (optional)" />
+                        <small>Required if using a licensed AWS Marketplace AMI</small>
+                    </div>
+                    <select class="instance-type" data-test="optimized-graviton">
+                        <option value="m6g.large">m6g.large (Graviton2)</option>
+                        <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
+                        <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
+                        <option value="m6g.4xlarge">m6g.4xlarge (Graviton2)</option>
+                        <option value="c6g.large">c6g.large (Graviton2)</option>
+                        <option value="c6g.xlarge">c6g.xlarge (Graviton2)</option>
+                    </select>
+                    <button class="run-test" data-test="optimized-graviton">Run benchmark</button>
+                    <div id="instance-summary-marketplace" class="instance-summary" style="display:none;">
+                        <h4>Active Instances:</h4>
+                        <div class="instance-list"></div>
+                    </div>
+                </div>
+
+                <div class="benchmark-option">
+                    <h3>2. "DIY" OpenCV on Graviton</h3>
+                    <p>Test OpenCV on Graviton (all generations)</p>
+                    <div class="build-mode-selector">
+                        <label>
+                            <input type="radio" name="graviton-build-mode" value="pip" checked>
+                            Quick (pip install) - up to ~10 min
+                        </label>
+                        <label>
+                            <input type="radio" name="graviton-build-mode" value="compile">
+                            Build from source - ~30-45 min
+                        </label>
+                    </div>
+                    <select class="instance-type" data-test="unoptimized-graviton">
+                        <option value="m6g.large" selected>m6g.large (Graviton2)</option>
+                        <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
+                        <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
+                        <option value="m6g.4xlarge">m6g.4xlarge (Graviton2)</option>
+                        <option value="m6g.large">m6g.large (Graviton2)</option>
+                        <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
+                        <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
+                        <option value="c6g.large">c6g.large (Graviton2)</option>
+                        <option value="c6g.large">c6g.large (Graviton2)</option>
+                    </select>
+                    <div style="margin: 10px 0;">
+                        <label style="display: block; margin-bottom: 5px; color: #4a5568; font-size: 0.9em;">
+                            Build Attempts (for Auto-Retry):
+                        </label>
+                        <input type="number" class="build-attempts" data-test="unoptimized-graviton" 
+                               value="10" min="1" max="50" 
+                               style="width: 100px; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 0.9em;">
+                        <span style="color: #718096; font-size: 0.85em; margin-left: 8px;">Max retry attempts</span>
+                    </div>
+                    <div style="text-align: center;">
+                        <button class="auto-retry-build" data-test="unoptimized-graviton" id="auto-retry-graviton">🔄 Auto-Retry EC2 Staging Until Success</button>
+                        <button class="run-test" data-test="unoptimized-graviton" style="margin-top: 10px;">Run benchmark</button>
+                    </div>
+                    <div id="instance-summary-graviton" class="instance-summary" style="display:none;">
+                        <h4>Active Instances:</h4>
+                        <div class="instance-list"></div>
+                    </div>
+                    <div id="build-history-graviton" class="build-history" style="display:none;">
+                        <h4>Last Build Attempt:</h4>
+                        <div class="build-history-content"></div>
+                    </div>
+                    <div class="build-status" id="build-status-unoptimized-graviton" style="display:none;">
+                        <div class="build-progress">
+                            <div class="build-step" data-step="launching">Launching instance...</div>
+                            <div class="build-step" data-step="installing">Installing OpenCV...</div>
+                            <div class="build-step" data-step="running">Running benchmark...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="benchmark-option">
+                    <h3>3. "DIY" OpenCV on x86</h3>
+                    <p>Test OpenCV on Intel x86</p>
+                    <div class="build-mode-selector">
+                        <label>
+                            <input type="radio" name="x86-build-mode" value="pip" checked>
+                            Quick (pip install) - up to ~10 min
+                        </label>
+                        <label>
+                            <input type="radio" name="x86-build-mode" value="compile">
+                            Build from source - ~30-45 min
+                        </label>
+                    </div>
+                    <select class="instance-type" data-test="unoptimized-x86">
+                        <option value="m6i.large" selected>m6i.large (Intel)</option>
+                        <option value="m7i.large">m7i.large (Intel)</option>
+                        <option value="m7i.xlarge">m7i.xlarge (Intel)</option>
+                        <option value="c6i.large">c6i.large (Intel)</option>
+                        <option value="c7i.large">c7i.large (Intel)</option>
+                    </select>
+                    <div style="margin: 10px 0;">
+                        <label style="display: block; margin-bottom: 5px; color: #4a5568; font-size: 0.9em;">
+                            Build Attempts (for Auto-Retry):
+                        </label>
+                        <input type="number" class="build-attempts" data-test="unoptimized-x86" 
+                               value="10" min="1" max="50" 
+                               style="width: 100px; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 0.9em;">
+                        <span style="color: #718096; font-size: 0.85em; margin-left: 8px;">Max retry attempts</span>
+                    </div>
+                    <div style="text-align: center;">
+                        <button class="auto-retry-build" data-test="unoptimized-x86" id="auto-retry-x86">🔄 Auto-Retry EC2 Staging Until Success</button>
+                        <button class="run-test" data-test="unoptimized-x86" style="margin-top: 10px;">Run benchmark</button>
+                    </div>
+                    <div id="instance-summary-x86" class="instance-summary" style="display:none;">
+                        <h4>Active Instances:</h4>
+                        <div class="instance-list"></div>
+                    </div>
+                    <div id="build-history-x86" class="build-history" style="display:none;">
+                        <h4>Last Build Attempt:</h4>
+                        <div class="build-history-content"></div>
+                    </div>
+                    <div class="build-status" id="build-status-unoptimized-x86" style="display:none;">
+                        <div class="build-progress">
+                            <div class="build-step" data-step="launching">Launching instance...</div>
+                            <div class="build-step" data-step="installing">Installing OpenCV...</div>
+                            <div class="build-step" data-step="running">Running benchmark...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="benchmark-option">
+                    <h3>4. Parallel Optimized Graviton AWS Marketplace Image with Auto-Scale</h3>
+                    <p>Run with multiple parallel Graviton instances with auto-scaling</p>
+                    <div class="parallel-config">
+                        <label>Max Instances: <input type="number" id="max-instances" value="5" min="1" max="20"></label>
+                        <select class="instance-type" data-test="parallel-graviton">
+                            <option value="m6g.large">m6g.large (Graviton2)</option>
+                            <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
+                            <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
+                            <option value="c6g.large">c6g.large (Graviton2)</option>
+                            <option value="c6g.xlarge">c6g.xlarge (Graviton2)</option>
+                        </select>
+                    </div>
+                    <button class="run-test" data-test="parallel-graviton">Run Parallel Benchmarks</button>
+                </div>
+            </div>
+
+            <div class="run-all-section">
+                <button id="run-all-tests" class="run-all-btn">Run All Benchmarks Sequentially</button>
+            </div>
+        </section>
+
+        <section class="results-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2 style="margin: 0;">Benchmark Results</h2>
+                <button id="clear-results-btn" class="clear-results-btn" title="Clear all benchmark results and processed images">
+                    🗑️ Clear Results
+                </button>
+            </div>
+            <div id="results-container">
+                <p>No benchmark results yet. Run a benchmark to see performance data.</p>
+            </div>
+        </section>
+
+        <section class="image-preview">
+            <h2>Processed Images Preview</h2>
+            <div id="image-gallery">
+                <p>Processed images will appear here after running benchmarks.</p>
+            </div>
+        </section>
+
+        <section class="benchmark-code-section" style="margin-top: 40px; padding: 20px; background: #f8f9fa; border-radius: 8px;">
+            <h2 style="margin-bottom: 15px; color: #2d3748;">OpenCV Benchmark Code</h2>
+            <p style="color: #4a5568; margin-bottom: 15px;">This is the actual Python code executed on each EC2 instance to benchmark OpenCV performance:</p>
+            <pre style="background: #2d3748; color: #e2e8f0; padding: 20px; border-radius: 6px; overflow-x: auto; font-size: 0.9em; line-height: 1.5;"><code># Process images with OpenCV operations
+for iteration in range(iterations):
+    for img_b64 in images_b64[:20]:  # Process first 20 images
+        # 1. Decode image from base64
+        img_data = base64.b64decode(img_b64)
+        img_array = np.frombuffer(img_data, dtype=np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        
+        # 2. Resize maintaining aspect ratio to 512xY
+        h, w = img.shape[:2]
+        if w > h:
+            new_w, new_h = 512, int(512 * h / w)
+        else:
+            new_w, new_h = int(512 * w / h), 512
+        img_resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        
+        # 3. Convert to grayscale for contour detection
+        gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
+        
+        # 4. Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # 5. Apply Otsu's thresholding
+        _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # 6. Find contours
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # 7. Draw contours in green
+        cv2.drawContours(img_resized, contours, -1, (0, 255, 0), 2)
+        
+        # 8. Encode back to JPEG (in memory, no filesystem access)
+        _, buffer = cv2.imencode('.jpg', img_resized, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        processed_b64 = base64.b64encode(buffer).decode('utf-8')</code></pre>
+            <div style="margin-top: 15px; padding: 15px; background: white; border-left: 4px solid #4299e1; border-radius: 4px;">
+                <p style="margin: 0; color: #2d3748; font-weight: 600;">Operations Benchmarked:</p>
+                <ul style="margin: 10px 0 0 20px; color: #4a5568;">
+                    <li><strong>decode</strong> - Base64 decode and cv2.imdecode()</li>
+                    <li><strong>resize</strong> - cv2.resize() with INTER_LINEAR interpolation</li>
+                    <li><strong>cvtColor</strong> - BGR to grayscale conversion</li>
+                    <li><strong>blur</strong> - cv2.GaussianBlur() with 5x5 kernel</li>
+                    <li><strong>threshold</strong> - cv2.threshold() with Otsu's method</li>
+                    <li><strong>findContours</strong> - cv2.findContours() with RETR_EXTERNAL</li>
+                    <li><strong>drawContours</strong> - cv2.drawContours() with 2px thickness</li>
+                    <li><strong>encode</strong> - cv2.imencode() to JPEG with quality 85</li>
+                </ul>
+            </div>
+            <p style="margin-top: 15px; color: #718096; font-size: 0.9em;">
+                <strong>Note:</strong> All benchmarks use identical code and parameters to ensure fair comparison. 
+                The only difference is the OpenCV build (COOL marketplace AMI vs DIY from source) and instance type.
+            </p>
+        </section>
+    </div>
+
+    <script>
+        // Cache busting - load app.js with timestamp
+        const script = document.createElement('script');
+        script.src = `app.js?v=${window.cacheBustTimestamp || new Date().getTime()}`;
+        document.body.appendChild(script);
+    </script>
+</body>
+</html>
