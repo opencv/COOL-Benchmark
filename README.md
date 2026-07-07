@@ -8,16 +8,15 @@ A benchmarking system that measures OpenCV image-processing performance across A
 
 1. The **orchestrator** (`shared/benchmark-orchestrator.py`) exposes a REST API on port `8080`. It receives benchmark requests from the frontend, launches EC2 instances via the AWS SDK, runs the OpenCV pipeline over SSH/SSM, collects results, and terminates instances when done.
 2. The **frontend** (`frontend/serve.py`) serves a static web UI on port `3000` that lets you configure and trigger benchmarks, watch live progress, and compare results.
-3. The **image search agent** (`agents/image-search-agent.py`) is an MCP server that fetches public images on demand (NASA, medical datasets, etc.) into volatile memory for the benchmark workload.
+3. The **local asset pool** (`assets/`, 27 JPEGs) is the benchmark image workload — loaded directly into memory at run time, no API keys or network access required.
 
 ---
 
 ## Prerequisites
 
 - Python 3.10+
-- An AWS account with permission to launch EC2 instances (e.g. :`t4g`, `m7g`, `c7g`, `m6i` families)
+- An AWS account with permission to launch EC2 instances (e.g. `t4g`, `m7g`, `c7g`, `m6i` families)
 - An EC2 key pair in your target region
-- An [Anthropic API key](https://console.anthropic.com/) for the image search agent
 - The AWS Marketplace OpenCV Graviton AMI ID for your region
 
 ---
@@ -51,7 +50,7 @@ pip install -r requirements.txt
 cp config-marketplace.example.json config-marketplace.json
 ```
 
-Open `config-marketplace.json` and replace `ami-xxxxxxxxxxxxxxxxx` with the OpenCV Graviton AMI ID from AWS Marketplace for your region. You can also set this later through the UI
+Open `config-marketplace.json` and replace `ami-xxxxxxxxxxxxxxxxx` with the OpenCV Graviton AMI ID from AWS Marketplace for your region. You can also set this later through the UI.
 
 ---
 
@@ -67,9 +66,6 @@ export AWS_DEFAULT_REGION="us-east-1"          # change to your preferred region
 
 # EC2 key pair name — must already exist in the region above
 export EC2_KEY_PAIR_NAME="your-ec2-key-pair-name"
-
-# Anthropic API key — used by the auto-retry feature to analyse build errors
-export ANTHROPIC_API_KEY="sk-ant-api03-..."
 
 # (Optional) Pre-configure the Marketplace AMI ID instead of entering it in the UI
 # export MARKETPLACE_AMI_ID="ami-xxxxxxxxxxxxxxxxx"
@@ -112,24 +108,29 @@ Navigate to [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
+## Image Workload
+
+The benchmark uses a local set of 27 pre-seeded JPEG images shipped in the `assets/` directory. No API keys or external network access are needed to load the image workload.
+
+In the UI, click **"Load Local Sample Images"** to read the images from disk into memory before running a benchmark. The orchestrator resolves the `assets/` path relative to the repo root automatically, so no path configuration is required.
+
+---
+
 ## Project Structure
 
 ```
 COOL-Benchmark/
+├── assets/                             # Static benchmark image pool (27 JPEGs)
 ├── shared/
 │   ├── benchmark-orchestrator.py       # Main backend — REST API + EC2 orchestration
 │   ├── benchmark_executor.py           # Per-instance benchmark runner
 │   ├── build_manager.py                # OpenCV build/install logic on remote instances
-│   ├── auto_retry_manager.py           # LLM-powered auto-retry for build failures
 │   └── shared_instance_benchmark.py
 ├── agentcore/
 │   └── instance-manager.py             # EC2 lifecycle management (launch, pool, terminate)
 ├── opencv-ami/
 │   ├── opencv-mcp-server.py            # MCP server deployed to every EC2 instance at runtime
 │   └── install-opencv-optimized.sh     # Graviton-optimised OpenCV build script (used by compile-from-source option)
-├── agents/
-│   ├── image-search-agent.py           # MCP server — fetches public images into memory
-│   └── requirements.txt
 ├── frontend/
 │   ├── serve.py                        # Static file server (port 3000)
 │   ├── index.html                      # Main UI
@@ -159,10 +160,6 @@ COOL-Benchmark/
 - Confirm `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION` are exported.
 - Verify your IAM user/role has `ec2:RunInstances`, `ec2:DescribeInstances`, `ec2:TerminateInstances`, and `ssm:SendCommand` permissions.
 - Check that `EC2_KEY_PAIR_NAME` matches an existing key pair in the configured region.
-
-**Auto-retry does not start**
-
-- Ensure `ANTHROPIC_API_KEY` is set before submitting a benchmark run.
 
 **Frontend shows "Cannot connect to backend"**
 

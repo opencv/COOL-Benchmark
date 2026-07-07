@@ -391,13 +391,18 @@ class BuildManager:
                             duration = time.time() - start_time
                             logger.error(f"❌ Installation failed after {duration:.1f}s: {error_msg}")
                             logger.error(f"Pattern matched: '{pattern}'")
-                            logger.error(f"Console output (last 2000 chars):\n{output[-2000:]}")
+                            # Show context around the matched pattern, not just the tail
+                            idx = output_clean.find(pattern)
+                            ctx_start = max(0, idx - 2000)
+                            ctx_end = min(len(output_clean), idx + 300)
+                            error_context = output_clean[ctx_start:ctx_end]
+                            logger.error(f"Error context (around matched pattern):\n{error_context}")
                             return {
                                 "status": "failed",
                                 "method": "pip",
                                 "duration": duration,
                                 "error": f"{error_msg} (detected after {duration:.0f}s)",
-                                "stderr": output[-2000:]  # Include more context
+                                "stderr": error_context
                             }
                     
                     logger.debug(f"Waiting for installation... ({i}s elapsed)")
@@ -883,7 +888,7 @@ echo "Step 3: Installing OpenCV via pip..."
 rm -f /usr/lib/python3/dist-packages/numpy-*.dist-info/RECORD 2>/dev/null || true
 
 # Install with --break-system-packages (REQUIRED on Ubuntu 24.04)
-if ! pip3 install --break-system-packages --ignore-installed numpy opencv-python-headless==4.12.0.88 Pillow scipy aiohttp; then
+if ! pip3 install --break-system-packages numpy "opencv-python-headless==4.12.0.88" Pillow scipy aiohttp; then
     echo "ERROR: pip install failed with exit code $?"
     echo "Checking what went wrong..."
     pip3 list | grep -E "(opencv|aiohttp|numpy)" || echo "No packages found"

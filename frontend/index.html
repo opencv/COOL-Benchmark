@@ -78,13 +78,8 @@
                 <h3>Configuration</h3>
                 <div class="config-grid">
                     <div class="config-item">
-                        <label for="claude-api-key">Claude API Key (for auto-retry):</label>
-                        <input type="text" id="claude-api-key" value="" placeholder="sk-ant-api03-..." />
-                        <small>Used by auto-retry feature to analyze and fix build errors</small>
-                    </div>
-                    <div class="config-item">
                         <label for="marketplace-ami-id">AWS Marketplace OpenCV AMI ID:</label>
-                        <input type="text" id="marketplace-ami-id" value="ami-0b775ed8c83396c73" placeholder="ami-xxxxxxxxx" />
+                        <input type="text" id="marketplace-ami-id" value="" placeholder="ami-xxxxxxxxx" />
                         <small>For options 1 & 4 (COOL & Parallel)</small>
                     </div>
                 </div>
@@ -96,29 +91,9 @@
         </section>
 
         <section class="prompts-panel">
-            <h2>Image Collection Prompts</h2>
+            <h2>Image Workload</h2>
             <div class="prompt-buttons">
-                <input type="text" class="prompt-input" id="prompt-1" value="Locate and upload in volatile memory 1000 public images of human cells in high resolution" />
-                <button class="prompt-btn" data-prompt-input="prompt-1">
-                    Execute Sample Prompt 1
-                </button>
-                <input type="text" class="prompt-input" id="prompt-2" value="Locate and upload in volatile memory 1000 high-resolution images from the NASA Mars Pathfinder mission" />
-                <button class="prompt-btn" data-prompt-input="prompt-2">
-                    Execute Sample Prompt 2
-                </button>
-            </div>
-            <div class="search-config">
-                <label>Search Timeout (seconds): 
-                    <input type="number" id="search-timeout" value="30" min="5" max="300" title="How long to search for images across concurrent threads">
-                </label>
-                <label>Min Images: 
-                    <input type="number" id="min-images" value="50" min="1" max="10000" title="Minimum number of images to find before stopping (even if timeout not reached)">
-                </label>
-                <span class="config-hint">Search continues until timeout OR min images reached</span>
-            </div>
-            <div class="custom-prompt">
-                <textarea id="custom-prompt" placeholder="Enter custom image search prompt..."></textarea>
-                <button id="custom-submit">Execute Custom Prompt</button>
+                <button id="local-images-btn" class="prompt-btn">Load Local Sample Images</button>
             </div>
         </section>
 
@@ -133,16 +108,15 @@
                 
                 <div class="communication-flow" id="flow-1">
                     <div class="flow-arrow">→</div>
-                    <div class="flow-label">Image Search Request</div>
+                    <div class="flow-label">Load Local Assets</div>
                 </div>
-                
+
                 <div class="agent-node" id="search-agent">
-                    <div class="agent-icon">🔍</div>
-                    <div class="agent-label">Image Search Agent (runs with local)</div>
+                    <div class="agent-icon">📁</div>
+                    <div class="agent-label">Local Asset Loader</div>
                     <div class="agent-status">Idle</div>
                     <div class="agent-tools">
-                        <span class="tool" id="tool-web-scraper">Web Scraper</span>
-                        <span class="tool" id="tool-nasa-api">NASA API</span>
+                        <span class="tool" id="tool-file-reader">File Reader</span>
                         <span class="tool" id="tool-image-validator">Image Validator</span>
                     </div>
                 </div>
@@ -243,10 +217,10 @@
             <div class="benchmark-grid">
                 <div class="benchmark-option">
                     <h3>1. COOL for Graviton (AWS Marketplace)</h3>
-                    <p>Run using AWS Marketplace optimized OpenCV (Graviton2 only)</p>
+                    <p>Run using AWS Marketplace optimized OpenCV (Graviton4 only)</p>
                     <div class="license-input-group">
                         <label for="marketplace-ami-id-option1">AWS Marketplace OpenCV AMI ID:</label>
-                        <input type="text" id="marketplace-ami-id-option1" value="ami-0b775ed8c83396c73" placeholder="ami-xxxxxxxxx" />
+                        <input type="text" id="marketplace-ami-id-option1" value="" placeholder="ami-xxxxxxxxx" />
                         <small>AMI ID for the marketplace OpenCV image</small>
                     </div>
                     <div class="license-input-group">
@@ -255,12 +229,12 @@
                         <small>Required if using a licensed AWS Marketplace AMI</small>
                     </div>
                     <select class="instance-type" data-test="optimized-graviton">
-                        <option value="m6g.large">m6g.large (Graviton2)</option>
-                        <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
-                        <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
-                        <option value="m6g.4xlarge">m6g.4xlarge (Graviton2)</option>
-                        <option value="c6g.large">c6g.large (Graviton2)</option>
-                        <option value="c6g.xlarge">c6g.xlarge (Graviton2)</option>
+                        <option value="m8g.large">m8g.large (Graviton4)</option>
+                        <option value="m8g.xlarge">m8g.xlarge (Graviton4)</option>
+                        <option value="m8g.2xlarge">m8g.2xlarge (Graviton4)</option>
+                        <option value="m8g.4xlarge">m8g.4xlarge (Graviton4)</option>
+                        <option value="c8g.large">c8g.large (Graviton4)</option>
+                        <option value="c8g.xlarge">c8g.xlarge (Graviton4)</option>
                     </select>
                     <button class="run-test" data-test="optimized-graviton">Run benchmark</button>
                     <div id="instance-summary-marketplace" class="instance-summary" style="display:none;">
@@ -283,27 +257,17 @@
                         </label>
                     </div>
                     <select class="instance-type" data-test="unoptimized-graviton">
-                        <option value="m6g.large" selected>m6g.large (Graviton2)</option>
-                        <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
-                        <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
-                        <option value="m6g.4xlarge">m6g.4xlarge (Graviton2)</option>
-                        <option value="m6g.large">m6g.large (Graviton2)</option>
-                        <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
-                        <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
-                        <option value="c6g.large">c6g.large (Graviton2)</option>
-                        <option value="c6g.large">c6g.large (Graviton2)</option>
+                        <option value="m8g.large" selected>m8g.large (Graviton4)</option>
+                        <option value="m8g.xlarge">m8g.xlarge (Graviton4)</option>
+                        <option value="m8g.2xlarge">m8g.2xlarge (Graviton4)</option>
+                        <option value="m8g.4xlarge">m8g.4xlarge (Graviton4)</option>
+                        <option value="m8g.large">m8g.large (Graviton4)</option>
+                        <option value="m8g.xlarge">m8g.xlarge (Graviton4)</option>
+                        <option value="m8g.2xlarge">m8g.2xlarge (Graviton4)</option>
+                        <option value="c8g.large">c8g.large (Graviton4)</option>
+                        <option value="c8g.large">c8g.large (Graviton4)</option>
                     </select>
-                    <div style="margin: 10px 0;">
-                        <label style="display: block; margin-bottom: 5px; color: #4a5568; font-size: 0.9em;">
-                            Build Attempts (for Auto-Retry):
-                        </label>
-                        <input type="number" class="build-attempts" data-test="unoptimized-graviton" 
-                               value="10" min="1" max="50" 
-                               style="width: 100px; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 0.9em;">
-                        <span style="color: #718096; font-size: 0.85em; margin-left: 8px;">Max retry attempts</span>
-                    </div>
                     <div style="text-align: center;">
-                        <button class="auto-retry-build" data-test="unoptimized-graviton" id="auto-retry-graviton">🔄 Auto-Retry EC2 Staging Until Success</button>
                         <button class="run-test" data-test="unoptimized-graviton" style="margin-top: 10px;">Run benchmark</button>
                     </div>
                     <div id="instance-summary-graviton" class="instance-summary" style="display:none;">
@@ -343,17 +307,7 @@
                         <option value="c6i.large">c6i.large (Intel)</option>
                         <option value="c7i.large">c7i.large (Intel)</option>
                     </select>
-                    <div style="margin: 10px 0;">
-                        <label style="display: block; margin-bottom: 5px; color: #4a5568; font-size: 0.9em;">
-                            Build Attempts (for Auto-Retry):
-                        </label>
-                        <input type="number" class="build-attempts" data-test="unoptimized-x86" 
-                               value="10" min="1" max="50" 
-                               style="width: 100px; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px; font-size: 0.9em;">
-                        <span style="color: #718096; font-size: 0.85em; margin-left: 8px;">Max retry attempts</span>
-                    </div>
                     <div style="text-align: center;">
-                        <button class="auto-retry-build" data-test="unoptimized-x86" id="auto-retry-x86">🔄 Auto-Retry EC2 Staging Until Success</button>
                         <button class="run-test" data-test="unoptimized-x86" style="margin-top: 10px;">Run benchmark</button>
                     </div>
                     <div id="instance-summary-x86" class="instance-summary" style="display:none;">
@@ -379,11 +333,11 @@
                     <div class="parallel-config">
                         <label>Max Instances: <input type="number" id="max-instances" value="5" min="1" max="20"></label>
                         <select class="instance-type" data-test="parallel-graviton">
-                            <option value="m6g.large">m6g.large (Graviton2)</option>
-                            <option value="m6g.xlarge">m6g.xlarge (Graviton2)</option>
-                            <option value="m6g.2xlarge">m6g.2xlarge (Graviton2)</option>
-                            <option value="c6g.large">c6g.large (Graviton2)</option>
-                            <option value="c6g.xlarge">c6g.xlarge (Graviton2)</option>
+                            <option value="m8g.large">m8g.large (Graviton4)</option>
+                            <option value="m8g.xlarge">m8g.xlarge (Graviton4)</option>
+                            <option value="m8g.2xlarge">m8g.2xlarge (Graviton4)</option>
+                            <option value="c8g.large">c8g.large (Graviton4)</option>
+                            <option value="c8g.xlarge">c8g.xlarge (Graviton4)</option>
                         </select>
                     </div>
                     <button class="run-test" data-test="parallel-graviton">Run Parallel Benchmarks</button>

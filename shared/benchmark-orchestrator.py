@@ -31,7 +31,6 @@ InstanceManager = instance_manager_module.InstanceManager
 
 from build_manager import BuildManager
 from benchmark_executor import execute_benchmark_with_build
-from auto_retry_manager import AutoRetryManager
 
 # Configure logging to both console and file
 logging.basicConfig(
@@ -100,7 +99,6 @@ class BenchmarkOrchestrator:
         _region = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", "us-east-1"))
         self.instance_manager = InstanceManager(region=_region)
         self.build_manager = BuildManager()
-        self.auto_retry_manager = None  # Will be initialized after instance_manager
         self.benchmark_tasks: Dict[str, BenchmarkTask] = {}
         self.image_search_tasks: Dict[str, ImageSearchTask] = {}
         self.session = aiohttp.ClientSession()
@@ -138,10 +136,7 @@ class BenchmarkOrchestrator:
         """Initialize the orchestrator"""
         try:
             await self.instance_manager.initialize()
-            
-            # Initialize auto-retry manager (pass self for orchestrator reference)
-            self.auto_retry_manager = AutoRetryManager(self.build_manager, self.instance_manager, self)
-            
+
             # Cleanup any orphaned benchmark instances from previous runs
             await self._cleanup_orphaned_instances()
             
@@ -183,577 +178,95 @@ class BenchmarkOrchestrator:
             logger.error(f"Failed to initialize orchestrator: {e}")
             raise
     
-    async def start_image_search(self, prompt: str, max_images: int = 1000, timeout: int = 20) -> str:
-        """Start an image search task"""
+    async def start_local_image_load(self, directory: str, max_images: int = 1000) -> str:
+        """Load images from a local directory into an ImageSearchTask"""
         task_id = str(uuid.uuid4())
-        
+
         task = ImageSearchTask(
             task_id=task_id,
-            prompt=prompt,
+            prompt=f"local:{directory}",
             status=TaskStatus.PENDING,
             images=[],
             start_time=time.time(),
-            timeout=timeout
+            timeout=0
         )
-        
+
         self.image_search_tasks[task_id] = task
-        
-        # Start search in background
-        asyncio.create_task(self._execute_image_search(task_id, prompt, max_images, timeout))
-        
-        logger.info(f"Started image search task {task_id} with {timeout}s timeout")
+        asyncio.create_task(self._execute_local_image_load(task_id, directory, max_images))
+
+        logger.info(f"Started local image load task {task_id} from {directory}")
         return task_id
-    
-    async def _execute_image_search(self, task_id: str, prompt: str, max_images: int, timeout: int = 20):
-        """Execute image search using real web scraping"""
+
+    async def _execute_local_image_load(self, task_id: str, directory: str, max_images: int):
+        """Execute local image loading from disk"""
         try:
             task = self.image_search_tasks[task_id]
             task.status = TaskStatus.RUNNING
-            
-            # Initialize images list immediately for incremental updates
-            if task.images is None:
-                task.images = []
-            
-            # Log search strategy
-            if "nasa" in prompt.lower() and ("mars" in prompt.lower() or "pathfinder" in prompt.lower()):
-                logger.info(f"🚀 Launching 4 parallel search threads for NASA Mars images:")
-                logger.info(f"   Thread 1: Wikimedia Commons API (commons.wikimedia.org)")
-                logger.info(f"   Thread 2: NASA Image API (images-api.nasa.gov)")
-                logger.info(f"   Thread 3: Google Images (google.com/images)")
-                logger.info(f"   Thread 4: Bing Images (bing.com/images)")
-                logger.info(f"   Timeout: {timeout}s | Target: {max_images} images")
-                images = await self._fetch_nasa_images(prompt, max_images, task, timeout)
-            elif "cell" in prompt.lower() and "human" in prompt.lower():
-                logger.info(f"🔬 Launching 4 parallel search threads for cell microscopy images:")
-                logger.info(f"   Thread 1: Flickr (flickr.com)")
-                logger.info(f"   Thread 2: Wikimedia Commons (commons.wikimedia.org)")
-                logger.info(f"   Thread 3: Google Images (google.com/images)")
-                logger.info(f"   Thread 4: Bing Images (bing.com/images)")
-                logger.info(f"   Timeout: {timeout}s | Target: {max_images} images")
-                images = await self._fetch_cell_images(prompt, max_images, task, timeout)
-            else:
-                logger.info(f"🔍 Launching general image search:")
-                logger.info(f"   Timeout: {timeout}s | Target: {max_images} images")
-                images = await self._fetch_general_images(prompt, max_images, task, timeout)
-            
+
+            if not os.path.isdir(directory):
+                raise ValueError(f"Directory not found: {directory}")
+
+            logger.info(f"📁 Loading local images from: {directory}")
+            await self._load_local_images(task, directory, max_images)
+
             task.status = TaskStatus.COMPLETED
             task.progress = 100.0
-            task.images = images
-            task.images_found = len(images)
-            
-            logger.info(f"✅ Image search task {task_id} completed with {len(images)} images")
-            
+            logger.info(f"✅ Local image load task {task_id} completed with {task.images_found} images")
+
         except Exception as e:
-            logger.error(f"Error in image search task {task_id}: {e}")
-            task.status = TaskStatus.FAILED
-            task.error = str(e)
-    
-    async def _download_and_encode_image(self, session, url: str) -> Optional[str]:
-        """Download an image and encode it as base64"""
+            logger.error(f"Error in local image load task {task_id}: {e}")
+            task = self.image_search_tasks.get(task_id)
+            if task:
+                task.status = TaskStatus.FAILED
+                task.error = str(e)
+
+    async def _load_local_images(self, task, directory: str, max_images: int) -> List[str]:
+        """Load images from a local directory and encode as base64"""
+        from PIL import Image
+        import base64
+        import io
+
+        supported_exts = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
         try:
-            async with session.get(url, timeout=15) as response:
-                if response.status == 200:
-                    content = await response.read()
-                    
-                    from PIL import Image
-                    import io
-                    
-                    img = Image.open(io.BytesIO(content))
-                    img.thumbnail((512, 512), Image.Resampling.LANCZOS)
-                    
-                    output = io.BytesIO()
-                    if img.mode in ('RGBA', 'LA', 'P'):
-                        img = img.convert('RGB')
-                    img.save(output, format='JPEG', quality=85)
-                    
-                    import base64
-                    return base64.b64encode(output.getvalue()).decode('utf-8')
-                    
+            image_files = sorted([
+                f for f in os.listdir(directory)
+                if os.path.splitext(f.lower())[1] in supported_exts
+            ])
         except Exception as e:
-            logger.warning(f"Error downloading image {url}: {e}")
-            return None
-    
-    async def _fetch_nasa_images(self, prompt: str, max_images: int, task, timeout: int = 20) -> List[str]:
-        """Fetch real NASA Mars images with TRULY concurrent requests from multiple sources"""
-        images = []
-        start_time = time.time()
-        timeout_seconds = timeout
-        
-        try:
-            from bs4 import BeautifulSoup
-            
-            logger.info(f"Fetching NASA Mars images with PARALLEL concurrent requests ({timeout}s timeout)...")
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            }
-            
-            async with aiohttp.ClientSession(headers=headers) as session:
-                
-                # Define all search sources as async functions
-                async def fetch_wikimedia():
-                    """Fetch from Wikimedia Commons"""
-                    source_images = []
-                    try:
-                        wiki_api = "https://commons.wikimedia.org/w/api.php"
-                        params = {
-                            "action": "query",
-                            "format": "json",
-                            "generator": "categorymembers",
-                            "gcmtitle": "Category:Mars_Pathfinder_images",
-                            "gcmtype": "file",
-                            "gcmlimit": 500,
-                            "prop": "imageinfo",
-                            "iiprop": "url",
-                            "iiurlwidth": 512
-                        }
-                        
-                        async with session.get(wiki_api, params=params, timeout=30) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                pages = data.get("query", {}).get("pages", {})
-                                
-                                logger.info(f"[Wikimedia] Found {len(pages)} images")
-                                
-                                # Extract URLs
-                                image_urls = []
-                                for page_data in pages.values():
-                                    imageinfo = page_data.get("imageinfo", [])
-                                    if imageinfo:
-                                        thumb_url = imageinfo[0].get("thumburl") or imageinfo[0].get("url")
-                                        if thumb_url:
-                                            image_urls.append(thumb_url)
-                                
-                                # Download in batches
-                                batch_size = 20
-                                for i in range(0, len(image_urls), batch_size):
-                                    if time.time() - start_time > timeout_seconds:
-                                        break
-                                    
-                                    batch = image_urls[i:i+batch_size]
-                                    download_tasks = [self._download_and_encode_image(session, url) for url in batch]
-                                    results = await asyncio.gather(*download_tasks, return_exceptions=True)
-                                    
-                                    for img_b64 in results:
-                                        if img_b64 and not isinstance(img_b64, Exception):
-                                            source_images.append(img_b64)
-                                
-                                logger.info(f"[Wikimedia] Downloaded {len(source_images)} images")
-                    
-                    except Exception as e:
-                        logger.warning(f"[Wikimedia] Error: {e}")
-                    
-                    return source_images
-                
-                async def fetch_nasa_api():
-                    """Fetch from NASA Image API"""
-                    source_images = []
-                    try:
-                        nasa_api = "https://images-api.nasa.gov/search"
-                        params = {
-                            "q": "mars pathfinder sojourner rover",
-                            "media_type": "image",
-                            "year_start": "1996",
-                            "year_end": "1998"
-                        }
-                        
-                        async with session.get(nasa_api, params=params, timeout=20) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                items = data.get("collection", {}).get("items", [])
-                                
-                                logger.info(f"[NASA API] Found {len(items)} items")
-                                
-                                # Extract URLs
-                                image_urls = []
-                                for item in items:
-                                    links = item.get("links", [])
-                                    for link in links:
-                                        if link.get("render") == "image":
-                                            img_url = link.get("href")
-                                            if img_url:
-                                                image_urls.append(img_url)
-                                                break
-                                
-                                # Download in batches
-                                batch_size = 15
-                                for i in range(0, len(image_urls), batch_size):
-                                    if time.time() - start_time > timeout_seconds:
-                                        break
-                                    
-                                    batch = image_urls[i:i+batch_size]
-                                    download_tasks = [self._download_and_encode_image(session, url) for url in batch]
-                                    results = await asyncio.gather(*download_tasks, return_exceptions=True)
-                                    
-                                    for img_b64 in results:
-                                        if img_b64 and not isinstance(img_b64, Exception):
-                                            source_images.append(img_b64)
-                                
-                                logger.info(f"[NASA API] Downloaded {len(source_images)} images")
-                    
-                    except Exception as e:
-                        logger.warning(f"[NASA API] Error: {e}")
-                    
-                    return source_images
-                
-                async def fetch_google_images():
-                    """Fetch from Google Images via web scraping"""
-                    source_images = []
-                    try:
-                        # Google Images search (scraping approach)
-                        search_query = "mars+pathfinder+nasa"
-                        google_url = f"https://www.google.com/search?q={search_query}&tbm=isch"
-                        
-                        async with session.get(google_url, timeout=20) as response:
-                            if response.status == 200:
-                                html = await response.text()
-                                soup = BeautifulSoup(html, 'html.parser')
-                                
-                                logger.info(f"[Google Images] Scraping search results")
-                                
-                                # Find image URLs in the page
-                                img_tags = soup.find_all('img')
-                                image_urls = []
-                                for img in img_tags:
-                                    src = img.get('src') or img.get('data-src')
-                                    if src and src.startswith('http'):
-                                        image_urls.append(src)
-                                
-                                # Download in batches
-                                batch_size = 10
-                                for i in range(0, min(len(image_urls), 50), batch_size):  # Limit to 50 images
-                                    if time.time() - start_time > timeout_seconds:
-                                        break
-                                    
-                                    batch = image_urls[i:i+batch_size]
-                                    download_tasks = [self._download_and_encode_image(session, url) for url in batch]
-                                    results = await asyncio.gather(*download_tasks, return_exceptions=True)
-                                    
-                                    for img_b64 in results:
-                                        if img_b64 and not isinstance(img_b64, Exception):
-                                            source_images.append(img_b64)
-                                
-                                logger.info(f"[Google Images] Downloaded {len(source_images)} images")
-                    
-                    except Exception as e:
-                        logger.warning(f"[Google Images] Error: {e}")
-                    
-                    return source_images
-                
-                async def fetch_bing_images():
-                    """Fetch from Bing Images via web scraping"""
-                    source_images = []
-                    try:
-                        # Bing Images search
-                        search_query = "mars+pathfinder+nasa"
-                        bing_url = f"https://www.bing.com/images/search?q={search_query}"
-                        
-                        async with session.get(bing_url, timeout=20) as response:
-                            if response.status == 200:
-                                html = await response.text()
-                                soup = BeautifulSoup(html, 'html.parser')
-                                
-                                logger.info(f"[Bing Images] Scraping search results")
-                                
-                                # Find image URLs in the page
-                                img_tags = soup.find_all('img', class_='mimg')
-                                image_urls = []
-                                for img in img_tags:
-                                    src = img.get('src') or img.get('data-src')
-                                    if src and src.startswith('http'):
-                                        image_urls.append(src)
-                                
-                                # Download in batches
-                                batch_size = 10
-                                for i in range(0, min(len(image_urls), 50), batch_size):  # Limit to 50 images
-                                    if time.time() - start_time > timeout_seconds:
-                                        break
-                                    
-                                    batch = image_urls[i:i+batch_size]
-                                    download_tasks = [self._download_and_encode_image(session, url) for url in batch]
-                                    results = await asyncio.gather(*download_tasks, return_exceptions=True)
-                                    
-                                    for img_b64 in results:
-                                        if img_b64 and not isinstance(img_b64, Exception):
-                                            source_images.append(img_b64)
-                                
-                                logger.info(f"[Bing Images] Downloaded {len(source_images)} images")
-                    
-                    except Exception as e:
-                        logger.warning(f"[Bing Images] Error: {e}")
-                    
-                    return source_images
-                
-                # Launch ALL sources in parallel (4 concurrent threads)
-                logger.info("Launching parallel searches from 4 sources...")
-                search_tasks = [
-                    fetch_wikimedia(),
-                    fetch_nasa_api(),
-                    fetch_google_images(),
-                    fetch_bing_images()
-                ]
-                
-                # Wait for all searches to complete (or timeout)
-                results = await asyncio.gather(*search_tasks, return_exceptions=True)
-                
-                # Combine all results
-                for result in results:
-                    if isinstance(result, list):
-                        images.extend(result)
-                        # Update task incrementally
-                        task.images.extend(result)
-                        task.images_found = len(task.images)
-                        task.progress = min(100, (time.time() - start_time) / timeout_seconds * 100)
-                
-                logger.info(f"Combined results from all sources: {len(images)} total images")
-            
-            elapsed = time.time() - start_time
-            logger.info(f"NASA image fetch completed: {len(images)} images in {elapsed:.1f}s")
-            return images
-            
-        except Exception as e:
-            logger.error(f"Error fetching NASA images: {e}")
-            return images
-    
-    async def _fetch_cell_images(self, prompt: str, max_images: int, task, timeout: int = 20) -> List[str]:
-        """Fetch cell microscopy images with concurrent web scraping from multiple sources"""
-        images = []
-        start_time = time.time()
-        timeout_seconds = timeout
-        
-        try:
-            from bs4 import BeautifulSoup
-            
-            logger.info(f"Fetching cell microscopy images with concurrent requests ({timeout}s timeout)...")
-            
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            }
-            
-            async with aiohttp.ClientSession(headers=headers) as session:
-                
-                async def fetch_flickr():
-                    """Fetch from Flickr"""
-                    source_images = []
-                    sources = [
-                        "https://www.flickr.com/search/?text=cell%20microscopy&license=2%2C3%2C4%2C5%2C6%2C9",
-                        "https://www.flickr.com/search/?text=human%20cells%20microscope&license=2%2C3%2C4%2C5%2C6%2C9",
-                    ]
-                    
-                    for source_url in sources:
-                        if time.time() - start_time > timeout_seconds:
-                            break
-                        try:
-                            async with session.get(source_url, timeout=20) as response:
-                                if response.status == 200:
-                                    html = await response.text()
-                                    soup = BeautifulSoup(html, 'html.parser')
-                                    img_tags = soup.find_all('img', src=True)
-                                    
-                                    img_urls = []
-                                    for img_tag in img_tags[:50]:
-                                        img_src = img_tag.get('src', '')
-                                        if img_src and img_src.startswith('http'):
-                                            img_urls.append(img_src)
-                                    
-                                    download_tasks = [self._download_and_encode_image(session, url) for url in img_urls[:20]]
-                                    results = await asyncio.gather(*download_tasks, return_exceptions=True)
-                                    
-                                    for img_b64 in results:
-                                        if img_b64 and not isinstance(img_b64, Exception):
-                                            source_images.append(img_b64)
-                        except Exception as e:
-                            logger.warning(f"[Flickr] Error: {e}")
-                    
-                    logger.info(f"[Flickr] Downloaded {len(source_images)} images")
-                    return source_images
-                
-                async def fetch_wikimedia_cells():
-                    """Fetch from Wikimedia Commons"""
-                    source_images = []
-                    sources = [
-                        "https://commons.wikimedia.org/wiki/Category:Cells",
-                        "https://commons.wikimedia.org/wiki/Category:Microscopy",
-                    ]
-                    
-                    for source_url in sources:
-                        if time.time() - start_time > timeout_seconds:
-                            break
-                        try:
-                            async with session.get(source_url, timeout=20) as response:
-                                if response.status == 200:
-                                    html = await response.text()
-                                    soup = BeautifulSoup(html, 'html.parser')
-                                    img_tags = soup.find_all('img', src=True)
-                                    
-                                    img_urls = []
-                                    for img_tag in img_tags[:50]:
-                                        img_src = img_tag.get('src', '')
-                                        if img_src and img_src.startswith('http'):
-                                            img_urls.append(img_src)
-                                    
-                                    download_tasks = [self._download_and_encode_image(session, url) for url in img_urls[:20]]
-                                    results = await asyncio.gather(*download_tasks, return_exceptions=True)
-                                    
-                                    for img_b64 in results:
-                                        if img_b64 and not isinstance(img_b64, Exception):
-                                            source_images.append(img_b64)
-                        except Exception as e:
-                            logger.warning(f"[Wikimedia] Error: {e}")
-                    
-                    logger.info(f"[Wikimedia] Downloaded {len(source_images)} images")
-                    return source_images
-                
-                async def fetch_google_cells():
-                    """Fetch from Google Images"""
-                    source_images = []
-                    try:
-                        search_query = "human+cells+microscopy"
-                        google_url = f"https://www.google.com/search?q={search_query}&tbm=isch"
-                        
-                        async with session.get(google_url, timeout=20) as response:
-                            if response.status == 200:
-                                html = await response.text()
-                                soup = BeautifulSoup(html, 'html.parser')
-                                img_tags = soup.find_all('img')
-                                
-                                img_urls = []
-                                for img in img_tags[:50]:
-                                    src = img.get('src') or img.get('data-src')
-                                    if src and src.startswith('http'):
-                                        img_urls.append(src)
-                                
-                                download_tasks = [self._download_and_encode_image(session, url) for url in img_urls[:30]]
-                                results = await asyncio.gather(*download_tasks, return_exceptions=True)
-                                
-                                for img_b64 in results:
-                                    if img_b64 and not isinstance(img_b64, Exception):
-                                        source_images.append(img_b64)
-                                
-                                logger.info(f"[Google Images] Downloaded {len(source_images)} images")
-                    except Exception as e:
-                        logger.warning(f"[Google Images] Error: {e}")
-                    
-                    return source_images
-                
-                async def fetch_bing_cells():
-                    """Fetch from Bing Images"""
-                    source_images = []
-                    try:
-                        search_query = "human+cells+microscopy"
-                        bing_url = f"https://www.bing.com/images/search?q={search_query}"
-                        
-                        async with session.get(bing_url, timeout=20) as response:
-                            if response.status == 200:
-                                html = await response.text()
-                                soup = BeautifulSoup(html, 'html.parser')
-                                img_tags = soup.find_all('img')
-                                
-                                img_urls = []
-                                for img in img_tags[:50]:
-                                    src = img.get('src') or img.get('data-src')
-                                    if src and src.startswith('http'):
-                                        img_urls.append(src)
-                                
-                                download_tasks = [self._download_and_encode_image(session, url) for url in img_urls[:30]]
-                                results = await asyncio.gather(*download_tasks, return_exceptions=True)
-                                
-                                for img_b64 in results:
-                                    if img_b64 and not isinstance(img_b64, Exception):
-                                        source_images.append(img_b64)
-                                
-                                logger.info(f"[Bing Images] Downloaded {len(source_images)} images")
-                    except Exception as e:
-                        logger.warning(f"[Bing Images] Error: {e}")
-                    
-                    return source_images
-                
-                # Launch ALL sources in parallel (4 concurrent threads)
-                logger.info("Launching parallel searches from 4 sources...")
-                search_tasks = [
-                    fetch_flickr(),
-                    fetch_wikimedia_cells(),
-                    fetch_google_cells(),
-                    fetch_bing_cells()
-                ]
-                
-                # Wait for all searches to complete (or timeout)
-                results = await asyncio.gather(*search_tasks, return_exceptions=True)
-                
-                # Combine all results
-                for result in results:
-                    if isinstance(result, list):
-                        images.extend(result)
-                        task.images.extend(result)
-                        task.images_found = len(task.images)
-                        task.progress = min(100, (time.time() - start_time) / timeout_seconds * 100)
-                
-                logger.info(f"Combined results from all sources: {len(images)} total images")
-            
-            elapsed = time.time() - start_time
-            logger.info(f"Cell image fetch completed: {len(images)} images in {elapsed:.1f}s")
-            return images
-            
-        except Exception as e:
-            logger.error(f"Error fetching cell images: {e}")
-            return images
-    
-    async def _fetch_general_images(self, prompt: str, max_images: int, task) -> List[str]:
-        """Fetch general images - fallback to synthetic for now"""
-        logger.warning(f"General image search not implemented, using synthetic images")
-        images = []
-        for i in range(min(max_images, 100)):
-            img = self._generate_synthetic_image_b64(f"{prompt}_{i}")
-            if img:
-                images.append(img)
-                task.images.append(img)
-                task.images_found = len(images)
-                task.progress = (len(images) / max_images) * 100
-        return images
-    
-    def _generate_synthetic_image_b64(self, seed: str) -> str:
-        """Generate a synthetic image as base64 for demo purposes"""
-        try:
-            from PIL import Image, ImageDraw
-            import base64
-            import io
-            import random
-            
-            # Set seed for reproducible images
-            random.seed(hash(seed) % 2**32)
-            
-            # Create image
-            img = Image.new('RGB', (512, 512), color=(
-                random.randint(50, 200),
-                random.randint(50, 200),
-                random.randint(50, 200)
-            ))
-            
-            draw = ImageDraw.Draw(img)
-            
-            # Add some shapes
-            for _ in range(random.randint(3, 8)):
-                x1, y1 = random.randint(0, 400), random.randint(0, 400)
-                x2, y2 = x1 + random.randint(50, 112), y1 + random.randint(50, 112)
-                color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-                
-                if random.choice([True, False]):
-                    draw.rectangle([x1, y1, x2, y2], fill=color)
-                else:
-                    draw.ellipse([x1, y1, x2, y2], fill=color)
-            
-            # Convert to base64
-            buffer = io.BytesIO()
-            img.save(buffer, format='JPEG', quality=85)
-            img_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
-            
-            return img_b64
-            
-        except Exception as e:
-            logger.warning(f"Error generating synthetic image: {e}")
-            return ""
+            logger.error(f"Cannot list directory {directory}: {e}")
+            return []
+
+        if max_images:
+            image_files = image_files[:max_images]
+
+        total = len(image_files)
+        logger.info(f"📁 Found {total} images in {directory}")
+
+        for filename in image_files:
+            path = os.path.join(directory, filename)
+            try:
+                with open(path, 'rb') as f:
+                    content = f.read()
+
+                img = Image.open(io.BytesIO(content))
+                img.thumbnail((512, 512), Image.Resampling.LANCZOS)
+
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img = img.convert('RGB')
+
+                output = io.BytesIO()
+                img.save(output, format='JPEG', quality=85)
+                encoded = base64.b64encode(output.getvalue()).decode('utf-8')
+
+                task.images.append(encoded)
+                task.images_found = len(task.images)
+                task.progress = (task.images_found / total) * 100 if total > 0 else 100.0
+
+            except Exception as e:
+                logger.warning(f"Skipping local image {filename}: {e}")
+
+        return task.images
+
     
     async def start_benchmark(self, test_type: str, instance_type: str, build_mode: str, max_instances: int, image_count: int, iterations: int = 100, pipeline_type: str = 'standard') -> str:
         """Start a benchmark test"""
@@ -1085,8 +598,8 @@ async def create_app():
     app.middlewares.append(cors_middleware)
     
     # API routes
-    app.router.add_post('/api/images/search', handle_start_image_search)
     app.router.add_get('/api/images/search/{task_id}/status', handle_image_search_status)
+    app.router.add_post('/api/images/local', handle_load_local_images)
     app.router.add_post('/api/benchmark/run', handle_start_benchmark)
     app.router.add_get('/api/benchmark/{task_id}/status', handle_benchmark_status)
     app.router.add_get('/api/opencv/status', handle_opencv_status)
@@ -1096,8 +609,6 @@ async def create_app():
     app.router.add_post('/api/instances/cleanup', handle_cleanup_instances)
     app.router.add_get('/api/instances/{instance_id}/console', handle_instance_console_log)
     app.router.add_get('/api/build/history', handle_build_history)
-    app.router.add_post('/api/build/auto-retry', handle_start_auto_retry)
-    app.router.add_get('/api/build/auto-retry/{task_id}/status', handle_auto_retry_status)
     app.router.add_post('/api/config/save', handle_save_config)
     
     # Static files - use absolute path
@@ -1109,21 +620,6 @@ async def create_app():
     
     return app
 
-async def handle_start_image_search(request):
-    """Handle image search start request"""
-    try:
-        data = await request.json()
-        prompt = data.get('prompt', '')
-        max_images = data.get('max_images', 1000)
-        timeout = data.get('timeout', 20)  # Default 20 seconds
-        
-        orchestrator = request.app['orchestrator']
-        task_id = await orchestrator.start_image_search(prompt, max_images, timeout)
-        
-        return web.json_response({'taskId': task_id})
-    except Exception as e:
-        return web.json_response({'error': str(e)}, status=500)
-
 async def handle_image_search_status(request):
     """Handle image search status request"""
     try:
@@ -1132,6 +628,21 @@ async def handle_image_search_status(request):
         status = await orchestrator.get_image_search_status(task_id)
         
         return web.json_response(status)
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+async def handle_load_local_images(request):
+    """Handle local image load request — reads images from the local assets directory"""
+    try:
+        data = await request.json()
+        default_assets = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'assets'))
+        directory = data.get('directory', default_assets)
+        max_images = data.get('max_images', 1000)
+
+        orchestrator = request.app['orchestrator']
+        task_id = await orchestrator.start_local_image_load(directory, max_images)
+
+        return web.json_response({'taskId': task_id})
     except Exception as e:
         return web.json_response({'error': str(e)}, status=500)
 
@@ -1335,87 +846,10 @@ async def handle_instance_console_log(request):
         logger.error(f"Error in console log handler: {e}")
         return web.json_response({'error': str(e)}, status=500)
 
-async def handle_start_auto_retry(request):
-    """Handle auto-retry build start request"""
-    print("========== HANDLE_START_AUTO_RETRY CALLED ==========", flush=True)
-    try:
-        data = await request.json()
-        print(f"========== REQUEST DATA: {data} ==========", flush=True)
-        test_type = data.get('testType', '')
-        instance_type = data.get('instanceType', '')
-        build_mode = data.get('buildMode', 'pip')
-        max_retries = data.get('maxRetries', 10)
-        claude_api_key = data.get('claudeApiKey', '') or os.environ.get('ANTHROPIC_API_KEY', '')
-
-        print(f"========== PARSED: test_type={test_type}, instance_type={instance_type} ==========", flush=True)
-
-        if not claude_api_key:
-            print("========== NO CLAUDE API KEY ==========", flush=True)
-            return web.json_response({'error': 'Claude API key is required. Set ANTHROPIC_API_KEY env var or enter it in the UI.'}, status=400)
-        
-        orchestrator = request.app['orchestrator']
-        task_id = str(uuid.uuid4())
-        
-        print(f"========== CALLING AUTO_RETRY_MANAGER.start_auto_retry ==========", flush=True)
-        logger.info(f"Starting auto-retry build: {test_type}, {instance_type}, {build_mode}")
-        
-        # Start auto-retry task
-        result = await orchestrator.auto_retry_manager.start_auto_retry(
-            task_id=task_id,
-            test_type=test_type,
-            instance_type=instance_type,
-            build_mode=build_mode,
-            max_retries=max_retries,
-            claude_api_key=claude_api_key
-        )
-        
-        print(f"========== RETURNING RESPONSE ==========", flush=True)
-        return web.json_response({'taskId': task_id, 'status': 'started'})
-    except Exception as e:
-        print(f"========== EXCEPTION IN HANDLER: {e} ==========", flush=True)
-        logger.error(f"Error starting auto-retry: {e}", exc_info=True)
-        return web.json_response({'error': str(e)}, status=500)
-
-async def handle_auto_retry_status(request):
-    """Handle auto-retry status request"""
-    try:
-        task_id = request.match_info['task_id']
-        orchestrator = request.app['orchestrator']
-        
-        status = orchestrator.auto_retry_manager.get_retry_status(task_id)
-        
-        if not status:
-            return web.json_response({'error': 'Task not found'}, status=404)
-        
-        # Convert snake_case to camelCase for JavaScript
-        response = {
-            'status': status.get('status'),
-            'testType': status.get('test_type'),
-            'instanceType': status.get('instance_type'),
-            'buildMode': status.get('build_mode'),
-            'maxRetries': status.get('max_retries'),
-            'attempt': status.get('attempt'),
-            'currentStep': status.get('current_step'),
-            'lastError': status.get('last_error'),
-            'error': status.get('error'),
-            'claudeAnalysis': status.get('claude_analysis'),
-            'claudeFixes': status.get('claude_fixes', []),
-            'attempts': status.get('attempts', []),
-            'totalTimeMinutes': status.get('total_time_minutes'),
-            'totalTimeSeconds': status.get('total_time_seconds'),
-            'totalElapsedMinutes': status.get('total_elapsed_minutes')  # Total time since start
-        }
-        
-        return web.json_response(response)
-    except Exception as e:
-        logger.error(f"Error getting auto-retry status: {e}")
-        return web.json_response({'error': str(e)}, status=500)
-
 async def handle_save_config(request):
     """Handle configuration save request"""
     try:
         data = await request.json()
-        claude_api_key = data.get('claudeApiKey', '')
         marketplace_ami_id = data.get('marketplaceAmiId', '')
         
         orchestrator = request.app['orchestrator']
