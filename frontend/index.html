@@ -203,6 +203,17 @@
                     🛑 Stop All Benchmarks
                 </button>
             </div>
+            <div class="pipeline-selector" style="margin: 20px 0; padding: 15px; background: #e9f0fb; border-radius: 8px; border-left: 4px solid #667eea;">
+                <label style="font-weight: 600; color: #2d3748; display: block; margin-bottom: 8px;">📦 OpenCV Version:</label>
+                <div style="display: flex; gap: 16px; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 0.95em; cursor: pointer;">
+                        <input type="radio" name="opencv-version" value="4" checked> OpenCV 4 &nbsp;<span style="color:#718096; font-size:0.85em;">(4.12.0.88)</span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 0.95em; cursor: pointer;">
+                        <input type="radio" name="opencv-version" value="5"> OpenCV 5 &nbsp;<span style="color:#718096; font-size:0.85em;">(5.0.0.93)</span>
+                    </label>
+                </div>
+            </div>
             <div class="pipeline-selector" style="margin: 20px 0; padding: 15px; background: #edf2f7; border-radius: 8px; border-left: 4px solid #4299e1;">
                 <label for="benchmark-pipeline" style="font-weight: 600; color: #2d3748; display: block; margin-bottom: 8px;">🔬 Benchmark Pipeline:</label>
                 <select id="benchmark-pipeline" style="padding: 10px 14px; border-radius: 6px; border: 1px solid #cbd5e0; font-size: 1em; width: 100%; max-width: 500px; background: white; cursor: pointer;">

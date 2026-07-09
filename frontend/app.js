@@ -1671,6 +1671,7 @@ ps aux | grep python</pre>
                     imageCount: this.imageCollection.length,
                     iterations: iterations,
                     pipelineType: pipelineType,
+                    opencvVersion: (document.querySelector('input[name="opencv-version"]:checked') || {value: '4'}).value,
                     marketplaceLicenseKey: this.getMarketplaceLicenseKey()
                 })
             });

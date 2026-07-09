@@ -66,6 +66,7 @@ class BenchmarkTask:
     build_mode: str = "pip"
     iterations: int = 100
     pipeline_type: str = "standard"
+    opencv_version: str = "4"
     build_progress: Optional[Dict[str, Any]] = None
     end_time: Optional[float] = None
     results: Optional[Dict[str, Any]] = None
@@ -268,7 +269,7 @@ class BenchmarkOrchestrator:
         return task.images
 
     
-    async def start_benchmark(self, test_type: str, instance_type: str, build_mode: str, max_instances: int, image_count: int, iterations: int = 100, pipeline_type: str = 'standard') -> str:
+    async def start_benchmark(self, test_type: str, instance_type: str, build_mode: str, max_instances: int, image_count: int, iterations: int = 100, pipeline_type: str = 'standard', opencv_version: str = '4') -> str:
         """Start a benchmark test"""
         task_id = str(uuid.uuid4())
         
@@ -282,10 +283,11 @@ class BenchmarkOrchestrator:
             start_time=time.time()
         )
         
-        # Store build mode and pipeline type in task
+        # Store build mode, pipeline type, and OpenCV version in task
         task.build_mode = build_mode
         task.iterations = iterations
         task.pipeline_type = pipeline_type
+        task.opencv_version = opencv_version
         
         # Initialize build progress with image count
         task.build_progress = {
@@ -657,12 +659,13 @@ async def handle_start_benchmark(request):
         image_count = data.get('imageCount', 0)
         iterations = data.get('iterations', 100)
         pipeline_type = data.get('pipelineType', 'standard')  # 'standard', 'augmentation', or 'analysis'
-        
-        logger.info(f"Starting benchmark: {test_type}, {instance_type}, {build_mode}, pipeline={pipeline_type}, images={image_count}")
-        
+        opencv_version = data.get('opencvVersion', '4')  # '4' or '5'
+
+        logger.info(f"Starting benchmark: {test_type}, {instance_type}, {build_mode}, pipeline={pipeline_type}, opencv={opencv_version}, images={image_count}")
+
         orchestrator = request.app['orchestrator']
         task_id = await orchestrator.start_benchmark(
-            test_type, instance_type, build_mode, max_instances, image_count, iterations, pipeline_type
+            test_type, instance_type, build_mode, max_instances, image_count, iterations, pipeline_type, opencv_version
         )
         
         logger.info(f"Benchmark task {task_id} started successfully")

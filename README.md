@@ -153,6 +153,17 @@ COOL-Benchmark/
 
 ---
 
+## OpenCV Version
+
+Select **OpenCV 4** or **OpenCV 5** directly in the UI before running a benchmark. The orchestrator installs the corresponding wheel on each EC2 instance at launch time — no code changes needed.
+
+| UI selection | Wheel installed |
+|---|---|
+| OpenCV 4 | `opencv-python-headless==4.12.0.88` |
+| OpenCV 5 | `opencv-python-headless==5.0.0.93` |
+
+---
+
 ## Troubleshooting
 
 **Orchestrator fails to launch instances**
