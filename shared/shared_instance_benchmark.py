@@ -13,10 +13,12 @@ build_mode differs from the requested one.
 import asyncio
 import logging
 
+from build_manager import OPENCV_VERSION_MAP
+
 logger = logging.getLogger("shared-instance-benchmark")
 
 
-async def reconfigure_mcp_for_diy(instance_id: str, build_manager):
+async def reconfigure_mcp_for_diy(instance_id: str, build_manager, opencv_version: str = "4"):
     """
     Reconfigure the MCP server on a COOL marketplace instance to use
     pip-installed (DIY) OpenCV instead.
@@ -24,10 +26,12 @@ async def reconfigure_mcp_for_diy(instance_id: str, build_manager):
     Steps:
       1. Stop the current COOL MCP systemd service
       2. Install opencv-python-headless via pip (system Python)
-      3. Overwrite the systemd unit to use /usr/bin/python3
-      4. Restart MCP service
+      3. Register bundled wheel libs with ldconfig + fix cv2 bootstrap
+      4. Overwrite the systemd unit to use /usr/bin/python3
+      5. Restart MCP service
     """
-    logger.info(f"🔧 Reconfiguring {instance_id}: COOL → DIY (pip)")
+    pip_version = OPENCV_VERSION_MAP.get(opencv_version, OPENCV_VERSION_MAP["4"])
+    logger.info(f"🔧 Reconfiguring {instance_id}: COOL → DIY (pip, opencv-python-headless=={pip_version})")
 
     commands = [
         # Step 1: Stop the COOL MCP server
@@ -40,13 +44,40 @@ async def reconfigure_mcp_for_diy(instance_id: str, build_manager):
         'sudo apt-get update -y -qq',
         'sudo apt-get install -y -qq python3-pip || exit 1',
         (
-            'pip3 install --break-system-packages '
-            'opencv-python-headless==4.12.0.88 numpy Pillow scipy aiohttp || exit 1'
+            f'pip3 install --break-system-packages '
+            f'opencv-python-headless=={pip_version} numpy Pillow scipy aiohttp || exit 1'
         ),
-        'python3 -c "import cv2; print(f\'DIY OpenCV {cv2.__version__} installed\')" || exit 1',
 
-        # Step 3: Overwrite systemd unit to use system Python
-        'echo "Step 3: Reconfiguring systemd service for DIY..."',
+        # Step 3: Register bundled wheel libs + fix cv2 bootstrap (single shell block
+        # so variables persist across all sub-commands).
+        # manylinux wheels bundle deps in numpy.libs/ and opencv_python_headless.libs/.
+        # Without ldconfig, dlopen() cannot resolve libopenblas, libavif, etc.
+        # The cv2 bootstrap also needs cv2.abi3.so symlinked into python-3.12/ so
+        # importlib.import_module("cv2") finds the native extension there instead of
+        # recursively re-importing the package.
+        (
+            'echo "Step 3: Registering bundled wheel libs and fixing cv2 bootstrap..." && '
+            'SITE_PKG=$(python3 -c "import site; print(site.getsitepackages()[0])") && '
+            'LDCONF=/etc/ld.so.conf.d/pip-wheel-bundled.conf && '
+            '> "$LDCONF" && '
+            'for D in "$SITE_PKG/numpy.libs" "$SITE_PKG/opencv_python_headless.libs"; do '
+            '  [ -d "$D" ] && echo "$D" >> "$LDCONF" && echo "Registered: $D"; '
+            'done; '
+            'ldconfig && '
+            'CV2_DIR="$SITE_PKG/cv2" && '
+            'ABI3="$CV2_DIR/cv2.abi3.so" && '
+            'PY312="$CV2_DIR/python-3.12" && '
+            '[ -f "$PY312/cv2.cpython-312-aarch64-linux-gnu.so" ] && '
+            '  rm -f "$PY312/cv2.cpython-312-aarch64-linux-gnu.so" && '
+            '  echo "Removed stale cpython-312 extension"; '
+            'find "$CV2_DIR" -maxdepth 1 -name "cv2.cpython-*.so" -delete 2>/dev/null; '
+            '[ -f "$ABI3" ] && mkdir -p "$PY312" && ln -sf "$ABI3" "$PY312/cv2.abi3.so" && '
+            '  echo "Linked abi3 into python-3.12/"; '
+            'python3 -c "import cv2; print(f\'DIY OpenCV {cv2.__version__} installed\')" || exit 1'
+        ),
+
+        # Step 4: Overwrite systemd unit to use system Python
+        'echo "Step 4: Reconfiguring systemd service for DIY..."',
         '''cat > /tmp/opencv-mcp-diy.service << 'EOFSYSTEMD'
 [Unit]
 Description=OpenCV MCP Server (DIY pip)
@@ -69,13 +100,13 @@ EOFSYSTEMD''',
         'sudo mv /tmp/opencv-mcp-diy.service /etc/systemd/system/opencv-mcp.service',
         'sudo systemctl daemon-reload || exit 1',
 
-        # Step 4: Restart with DIY config
-        'echo "Step 4: Starting DIY MCP server..."',
+        # Step 5: Restart with DIY config
+        'echo "Step 5: Starting DIY MCP server..."',
         'sudo systemctl start opencv-mcp',
         'sleep 5',
 
-        # Step 5: Wait for service to become active (no set -e, so loop works)
-        'echo "Step 5: Verifying DIY MCP server..."',
+        # Step 6: Wait for service to become active (no set -e, so loop works)
+        'echo "Step 6: Verifying DIY MCP server..."',
         'for i in $(seq 1 30); do STATUS=$(systemctl is-active opencv-mcp 2>/dev/null || true); if [ "$STATUS" = "active" ]; then echo "MCP service active"; break; fi; echo "Waiting for MCP service... ($STATUS, ${i}s)"; sleep 1; done',
         'systemctl is-active opencv-mcp || (echo "ERROR: MCP service not active"; systemctl status opencv-mcp --no-pager; exit 1)',
         'curl -s http://localhost:8080/health || echo "MCP not yet responding"',

@@ -12,6 +12,12 @@ import time
 
 logger = logging.getLogger("build-manager")
 
+# Maps the UI selection to the exact pip wheel version.
+OPENCV_VERSION_MAP = {
+    "4": "4.12.0.88",
+    "5": "5.0.0.93",
+}
+
 class BuildManager:
     """Manages OpenCV builds on EC2 instances"""
     
@@ -260,7 +266,7 @@ class BuildManager:
             logger.error(f"Error executing SSM command: {e}")
             return {'status': 'failed', 'error': str(e)}
     
-    async def install_opencv_pip(self, instance_id: str, architecture: str = "arm64") -> Dict[str, Any]:
+    async def install_opencv_pip(self, instance_id: str, architecture: str = "arm64", opencv_version: str = "4") -> Dict[str, Any]:
         """
         Install OpenCV via pip (quick mode ~10 minutes)
         Uses user-data script - just waits for completion
@@ -300,10 +306,11 @@ class BuildManager:
                         logger.info(f"📝 Installation in progress... ({i}s elapsed, {len(output)} bytes of console output)")
                         last_output_length = len(output)
                     
-                    # Check for success markers (check BEFORE error patterns)
-                    # 'OpenCV installation complete' is from user-data script
-                    # 'Started opencv-mcp.service' is from systemd (means MCP server is running)
-                    if 'OpenCV installation complete' in output or 'Started opencv-mcp.service' in output:
+                    # Check for success marker — only trust the explicit marker echoed after
+                    # cv2 import is verified (Step 4) and MCP health check passes (Step 7).
+                    # Do NOT use 'Started opencv-mcp.service': systemd logs that the moment
+                    # the process starts, before cv2 import is known to succeed.
+                    if 'OpenCV installation complete' in output:
                         duration = time.time() - start_time
                         logger.info(f"✅ OpenCV installed successfully on {instance_id} in {duration:.1f}s")
                         logger.info(f"📋 Installation verified from console output")
@@ -391,13 +398,18 @@ class BuildManager:
                             duration = time.time() - start_time
                             logger.error(f"❌ Installation failed after {duration:.1f}s: {error_msg}")
                             logger.error(f"Pattern matched: '{pattern}'")
-                            logger.error(f"Console output (last 2000 chars):\n{output[-2000:]}")
+                            # Show context around the matched pattern, not just the tail
+                            idx = output_clean.find(pattern)
+                            ctx_start = max(0, idx - 2000)
+                            ctx_end = min(len(output_clean), idx + 300)
+                            error_context = output_clean[ctx_start:ctx_end]
+                            logger.error(f"Error context (around matched pattern):\n{error_context}")
                             return {
                                 "status": "failed",
                                 "method": "pip",
                                 "duration": duration,
                                 "error": f"{error_msg} (detected after {duration:.0f}s)",
-                                "stderr": output[-2000:]  # Include more context
+                                "stderr": error_context
                             }
                     
                     logger.debug(f"Waiting for installation... ({i}s elapsed)")
@@ -807,7 +819,7 @@ EOFSYSTEMD''',
                 "error": str(e)
             }
     
-    def get_user_data_script(self, build_mode: str, architecture: str) -> str:
+    def get_user_data_script(self, build_mode: str, architecture: str, opencv_version: str = "4") -> str:
         """
         Generate user data script based on build mode
         
@@ -819,7 +831,7 @@ EOFSYSTEMD''',
             User data script as string
         """
         if build_mode == "pip":
-            user_data = self._get_pip_user_data()
+            user_data = self._get_pip_user_data(opencv_version)
         elif build_mode == "compile":
             user_data = self._get_compile_user_data(architecture)
         else:  # marketplace
@@ -837,7 +849,7 @@ EOFSYSTEMD''',
         
         return user_data
     
-    def _get_pip_user_data(self) -> str:
+    def _get_pip_user_data(self, opencv_version: str = "4") -> str:
         """Get user data script for pip installation"""
         # Read the MCP server code - use absolute path relative to this file
         current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -862,7 +874,10 @@ EOFSYSTEMD''',
             except Exception as e2:
                 logger.error(f"Failed to read MCP server code from {alt_path}: {e2}")
                 mcp_server_code = "# MCP server code not found"
-        
+
+        pip_version = OPENCV_VERSION_MAP.get(opencv_version, OPENCV_VERSION_MAP["4"])
+        logger.info(f"User-data: installing opencv-python-headless=={pip_version} (OpenCV {opencv_version})")
+
         return f"""#!/bin/bash
 echo "=== USER DATA SCRIPT STARTING ==="
 date
@@ -883,7 +898,7 @@ echo "Step 3: Installing OpenCV via pip..."
 rm -f /usr/lib/python3/dist-packages/numpy-*.dist-info/RECORD 2>/dev/null || true
 
 # Install with --break-system-packages (REQUIRED on Ubuntu 24.04)
-if ! pip3 install --break-system-packages --ignore-installed numpy opencv-python-headless==4.12.0.88 Pillow scipy aiohttp; then
+if ! pip3 install --break-system-packages numpy "opencv-python-headless=={pip_version}" Pillow scipy aiohttp; then
     echo "ERROR: pip install failed with exit code $?"
     echo "Checking what went wrong..."
     pip3 list | grep -E "(opencv|aiohttp|numpy)" || echo "No packages found"
@@ -893,10 +908,55 @@ fi
 
 echo "Step 3 complete"
 
+# Register bundled wheel libs (numpy.libs/, opencv_python_headless.libs/) with ldconfig.
+# manylinux wheels bundle their deps; without these dirs visible to dlopen(),
+# cv2.abi3.so cannot load OpenBLAS or ffmpeg at runtime.
+SITE_PKG=$(python3 -c "import site; print(site.getsitepackages()[0])")
+LDCONF_FILE=/etc/ld.so.conf.d/pip-wheel-bundled.conf
+> "$LDCONF_FILE"
+for LIBS_DIR in "$SITE_PKG/numpy.libs" "$SITE_PKG/opencv_python_headless.libs"; do
+    if [ -d "$LIBS_DIR" ]; then
+        echo "$LIBS_DIR" >> "$LDCONF_FILE"
+        echo "Queued for ldconfig: $LIBS_DIR"
+    fi
+done
+ldconfig
+echo "ldconfig updated"
+
+# Fix cv2 bootstrap: __init__.py adds python-3.12/ to sys.path then calls import_module("cv2").
+# Stale cpython-312 .so files cause linker errors; a missing python-3.12/ dir causes recursion.
+# Remove stale extensions, then symlink cv2.abi3.so into python-3.12/.
+SITE_PKG=$(python3 -c "import site; print(site.getsitepackages()[0])")
+CV2_DIR="$SITE_PKG/cv2"
+ABI3_SO="$CV2_DIR/cv2.abi3.so"
+PY_SUBDIR="$CV2_DIR/python-3.12"
+# Remove stale cpython extension from python-3.12/ (links against missing system libs)
+if [ -f "$PY_SUBDIR/cv2.cpython-312-aarch64-linux-gnu.so" ]; then
+    echo "Removing stale cpython-312 cv2 extension..."
+    rm -f "$PY_SUBDIR/cv2.cpython-312-aarch64-linux-gnu.so"
+fi
+# Remove any other stale cpython extensions directly in the cv2 dir root
+find "$CV2_DIR" -maxdepth 1 -name "cv2.cpython-*.so" -delete 2>/dev/null || true
+# Ensure python-3.12/ contains cv2.abi3.so so the bootstrap import_module("cv2")
+# finds the native extension rather than recursively re-importing the package
+if [ -f "$ABI3_SO" ]; then
+    mkdir -p "$PY_SUBDIR"
+    ln -sf "$ABI3_SO" "$PY_SUBDIR/cv2.abi3.so"
+    echo "Linked cv2.abi3.so into python-3.12/ for bootstrap compatibility"
+else
+    echo "WARNING: cv2.abi3.so not found at $ABI3_SO — import may fail"
+fi
 
 echo "Step 4: Verifying OpenCV..."
-python3 -c "import cv2; print(f'OpenCV {{cv2.__version__}} installed')"
-python3 -c "import aiohttp; print(f'aiohttp {{aiohttp.__version__}} installed')"
+if ! python3 -c "import cv2; print(f'OpenCV {{cv2.__version__}} installed')"; then
+    echo "ERROR: pip install failed - cv2 import verification failed"
+    pip3 list | grep -E "(opencv|numpy)" || echo "No relevant packages found"
+    exit 1
+fi
+if ! python3 -c "import aiohttp; print(f'aiohttp {{aiohttp.__version__}} installed')"; then
+    echo "ERROR: pip install failed - aiohttp import verification failed"
+    exit 1
+fi
 echo "Step 4 complete"
 
 echo "Step 5: Deploying MCP server..."

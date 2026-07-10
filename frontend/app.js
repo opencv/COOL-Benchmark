@@ -92,45 +92,12 @@ class OpenCVBenchmarkApp {
             });
         }
 
-        // Check if buttons exist
-        const promptButtons = document.querySelectorAll('.prompt-btn');
-        console.log('Found prompt buttons:', promptButtons.length); // Debug
-
-        // Prompt buttons - now read from input fields
-        promptButtons.forEach((btn, index) => {
-            console.log(`Setting up event listener for button ${index}:`, btn.textContent.trim()); // Debug
-            btn.addEventListener('click', (e) => {
-                console.log('=== PROMPT BUTTON CLICKED ===', e.target);
-                const promptInputId = e.target.getAttribute('data-prompt-input');
-                console.log('=== promptInputId:', promptInputId);
-                const promptInput = document.getElementById(promptInputId);
-                console.log('=== promptInput element:', promptInput);
-                if (promptInput) {
-                    const prompt = promptInput.value.trim();
-                    console.log('=== Executing prompt from input:', prompt); // Debug
-                    if (prompt) {
-                        this.executeImageSearch(prompt);
-                    } else {
-                        console.error('=== Prompt is empty!');
-                    }
-                } else {
-                    console.error('=== promptInput element not found for id:', promptInputId);
-                }
+        // Local images button
+        const localImagesBtn = document.getElementById('local-images-btn');
+        if (localImagesBtn) {
+            localImagesBtn.addEventListener('click', () => {
+                this.loadLocalImages();
             });
-        });
-
-        // Custom prompt
-        const customSubmit = document.getElementById('custom-submit');
-        if (customSubmit) {
-            customSubmit.addEventListener('click', () => {
-                const customPrompt = document.getElementById('custom-prompt').value.trim();
-                console.log('Custom prompt submitted:', customPrompt); // Debug
-                if (customPrompt) {
-                    this.executeImageSearch(customPrompt);
-                }
-            });
-        } else {
-            console.error('Custom submit button not found!');
         }
 
         // Test buttons
@@ -150,34 +117,6 @@ class OpenCVBenchmarkApp {
             });
         });
 
-        // Auto-retry build buttons
-        document.querySelectorAll('.auto-retry-build').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const testType = e.target.getAttribute('data-test');
-                // Navigate up to the benchmark-option div to find the instance-type select and build attempts
-                const benchmarkOption = e.target.closest('.benchmark-option');
-                const instanceType = benchmarkOption.querySelector('.instance-type').value;
-                const buildAttemptsInput = benchmarkOption.querySelector('.build-attempts');
-                const buildAttempts = buildAttemptsInput ? parseInt(buildAttemptsInput.value) : 10;
-                this.startAutoRetryBuild(testType, instanceType, buildAttempts);
-            });
-        });
-
-        // Initialize auto-retry buttons as disabled (since pip is default)
-        const autoRetryGravitonBtn = document.getElementById('auto-retry-graviton');
-        const autoRetryX86Btn = document.getElementById('auto-retry-x86');
-        if (autoRetryGravitonBtn) {
-            autoRetryGravitonBtn.disabled = true;
-            autoRetryGravitonBtn.style.opacity = '0.5';
-            autoRetryGravitonBtn.style.cursor = 'not-allowed';
-            autoRetryGravitonBtn.title = 'Only available with "Build from source" mode';
-        }
-        if (autoRetryX86Btn) {
-            autoRetryX86Btn.disabled = true;
-            autoRetryX86Btn.style.opacity = '0.5';
-            autoRetryX86Btn.style.cursor = 'not-allowed';
-            autoRetryX86Btn.title = 'Only available with "Build from source" mode';
-        }
 
         // Run all tests
         const runAllBtn = document.getElementById('run-all-tests');
@@ -227,46 +166,6 @@ class OpenCVBenchmarkApp {
             });
         }
 
-        // Update auto-retry button text when build mode changes
-        const gravitonBuildModes = document.querySelectorAll('input[name="graviton-build-mode"]');
-        gravitonBuildModes.forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const button = document.getElementById('auto-retry-graviton');
-                if (button && e.target.value === 'compile') {
-                    button.textContent = '🔄 Auto-Retry EC2 Staging Until Success (Build from Source)';
-                    button.disabled = false;
-                    button.style.opacity = '1';
-                    button.style.cursor = 'pointer';
-                    button.title = '';
-                } else if (button) {
-                    button.textContent = '🔄 Auto-Retry EC2 Staging Until Success';
-                    button.disabled = true;
-                    button.style.opacity = '0.5';
-                    button.style.cursor = 'not-allowed';
-                    button.title = 'Only available with "Build from source" mode';
-                }
-            });
-        });
-
-        const x86BuildModes = document.querySelectorAll('input[name="x86-build-mode"]');
-        x86BuildModes.forEach(radio => {
-            radio.addEventListener('change', (e) => {
-                const button = document.getElementById('auto-retry-x86');
-                if (button && e.target.value === 'compile') {
-                    button.textContent = '🔄 Auto-Retry EC2 Staging Until Success (Build from Source)';
-                    button.disabled = false;
-                    button.style.opacity = '1';
-                    button.style.cursor = 'pointer';
-                    button.title = '';
-                } else if (button) {
-                    button.textContent = '🔄 Auto-Retry EC2 Staging Until Success';
-                    button.disabled = true;
-                    button.style.opacity = '0.5';
-                    button.style.cursor = 'not-allowed';
-                    button.title = 'Only available with "Build from source" mode';
-                }
-            });
-        });
 
         // Load saved configuration on init
         this.loadConfiguration();
@@ -1391,95 +1290,42 @@ ps aux | grep python</pre>
         document.body.appendChild(modal);
     }
 
-    // Enhanced image search with live preview
-    async executeImageSearch(prompt) {
-        console.log('executeImageSearch called with prompt:', prompt); // Debug
-
-        // Stop any existing image cycling
+    // Load images directly from the local directory on the server
+    async loadLocalImages() {
         this.stopImageCycling();
+        this.initializeLivePreview();
+        this.loadingStartTime = Date.now();
+        this.lastImageCount = 0;
 
         try {
-            // Initialize preview
-            this.initializeLivePreview();
-            this.loadingStartTime = Date.now();
-            this.lastImageCount = 0;
-
-            console.log('Preview initialized, sending request...'); // Debug
-
-            // Get search timeout and min images from inputs
-            const searchTimeout = parseInt(document.getElementById('search-timeout').value) || 30;
-            const minImages = parseInt(document.getElementById('min-images').value) || 50;
-
-            // Activate frontend agent
-            this.updateAgentStatus('frontend-agent', 'Sending Request', true);
-            this.logCommunication(`Frontend: Initiating image search for "${prompt}" (${searchTimeout}s timeout, min ${minImages} images)`, 'info');
-
-            // Show communication flow
+            this.updateAgentStatus('frontend-agent', 'Loading Local Images', true);
+            this.logCommunication('Frontend: Loading local images from disk', 'info');
             this.activateFlow('flow-1');
 
-            // Activate search agent
             setTimeout(() => {
-                this.updateAgentStatus('search-agent', 'Processing Request', true);
-                this.logCommunication('Search Agent: Received image search request via MCP', 'success');
-                this.activateTool('tool-web-scraper', 3000);
-            }, 500);
+                this.updateAgentStatus('search-agent', 'Reading Files', true);
+                this.logCommunication('📁 Reading images from Local directory', 'success');
+            }, 300);
 
-            this.updateImageCollectionStatus('Initializing search agents...', 0);
+            this.updateImageCollectionStatus('Loading local images from disk...', 0);
 
-            console.log('Making fetch request to backend...'); // Debug
-
-            const response = await fetch(this.getApiUrl('/api/images/search'), {
+            const response = await fetch(this.getApiUrl('/api/images/local'), {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    prompt,
-                    timeout: searchTimeout,
-                    min_images: minImages
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ max_images: 1000 })
             });
 
-            console.log('Backend response status:', response.status); // Debug
-
-            if (!response.ok) {
-                throw new Error('Failed to start image search');
-            }
+            if (!response.ok) throw new Error('Failed to start local image load');
 
             const { taskId } = await response.json();
-            console.log('Received task ID:', taskId); // Debug
+            this.logCommunication(`📁 Local load task started (${taskId.substring(0, 8)}...)`, 'success');
 
-            // Show orchestrator activation and concurrent search details
-            setTimeout(() => {
-                this.activateFlow('flow-2');
-                this.updateAgentStatus('orchestrator-agent', 'Coordinating Search', true);
-                this.logCommunication('Orchestrator: Managing search task distribution', 'info');
-
-                // Log concurrent search threads based on prompt
-                if (prompt.toLowerCase().includes('nasa') || prompt.toLowerCase().includes('mars') || prompt.toLowerCase().includes('pathfinder')) {
-                    this.logCommunication('🚀 Launching 4 concurrent search threads:', 'info');
-                    this.logCommunication('   Thread 1: Wikimedia Commons API → commons.wikimedia.org', 'info');
-                    this.logCommunication('   Thread 2: NASA Image API → images-api.nasa.gov', 'info');
-                    this.logCommunication('   Thread 3: Google Images → google.com/images', 'info');
-                    this.logCommunication('   Thread 4: Bing Images → bing.com/images', 'info');
-                } else if (prompt.toLowerCase().includes('cell') || prompt.toLowerCase().includes('microscopy')) {
-                    this.logCommunication('🔬 Launching 4 concurrent search threads:', 'info');
-                    this.logCommunication('   Thread 1: Flickr → flickr.com', 'info');
-                    this.logCommunication('   Thread 2: Wikimedia Commons → commons.wikimedia.org', 'info');
-                    this.logCommunication('   Thread 3: Google Images → google.com/images', 'info');
-                    this.logCommunication('   Thread 4: Bing Images → bing.com/images', 'info');
-                } else {
-                    this.logCommunication('🔍 Launching concurrent image search threads', 'info');
-                }
-
-                this.activateTool('tool-instance-manager', 5000);
-            }, 1000);
-
-            this.pollImageSearchProgress(taskId);
+            // Reuse the same polling loop as web search — same status endpoint, same image format
+            await this.pollImageSearchProgress(taskId);
 
         } catch (error) {
-            console.error('Error executing image search:', error);
-            this.updateImageCollectionStatus('Error: Failed to search for images', 0);
+            console.error('Error loading local images:', error);
+            this.updateImageCollectionStatus('Error: Failed to load local images', 0);
             this.logCommunication(`Error: ${error.message}`, 'error');
             this.updateAgentStatus('search-agent', 'Error', false);
         }
@@ -1498,8 +1344,8 @@ ps aux | grep python</pre>
                 // Update progress and agent status
                 if (data.progress > lastProgress) {
                     if (data.progress < 30) {
-                        this.activateTool('tool-nasa-api', 1000);
-                        this.logCommunication(`Search Agent: Found ${data.images_found} images`, 'success');
+                        this.activateTool('tool-file-reader', 1000);
+                        this.logCommunication(`Asset Loader: Found ${data.images_found} images`, 'success');
                     } else if (data.progress < 70) {
                         this.activateTool('tool-image-validator', 1000);
                         this.logCommunication(`Search Agent: Validating image quality`, 'info');
@@ -1698,65 +1544,6 @@ ps aux | grep python</pre>
         }
     }
 
-    // Disable auto-retry button for a specific test type
-    disableAutoRetryButton(testType) {
-        const buttonId = this.getAutoRetryButtonId(testType);
-        if (buttonId) {
-            const btn = document.getElementById(buttonId);
-            if (btn) {
-                btn.disabled = true;
-                btn.style.opacity = '0.5';
-                btn.style.cursor = 'not-allowed';
-                console.log(`Disabled auto-retry button: ${buttonId}`);
-            }
-        }
-    }
-
-    // Enable auto-retry button for a specific test type
-    enableAutoRetryButton(testType) {
-        const buttonId = this.getAutoRetryButtonId(testType);
-        if (buttonId) {
-            const btn = document.getElementById(buttonId);
-            if (btn) {
-                // Check current build mode
-                let buildMode = 'pip';
-                if (testType === 'unoptimized-graviton') {
-                    const gravitonMode = document.querySelector('input[name="graviton-build-mode"]:checked');
-                    buildMode = gravitonMode ? gravitonMode.value : 'pip';
-                } else if (testType === 'unoptimized-x86') {
-                    const x86Mode = document.querySelector('input[name="x86-build-mode"]:checked');
-                    buildMode = x86Mode ? x86Mode.value : 'pip';
-                }
-
-                // Only enable if build mode is "compile"
-                if (buildMode === 'compile') {
-                    btn.disabled = false;
-                    btn.style.opacity = '1';
-                    btn.style.cursor = 'pointer';
-                    btn.textContent = '🔄 Auto-Retry EC2 Staging Until Success (Build from Source)';
-                    btn.title = '';
-                } else {
-                    btn.disabled = true;
-                    btn.style.opacity = '0.5';
-                    btn.style.cursor = 'not-allowed';
-                    btn.textContent = '🔄 Auto-Retry EC2 Staging Until Success';
-                    btn.title = 'Only available with "Build from source" mode';
-                }
-
-                console.log(`Reset auto-retry button: ${buttonId}, buildMode: ${buildMode}`);
-            }
-        }
-    }
-
-    // Get auto-retry button ID for a test type
-    getAutoRetryButtonId(testType) {
-        const mapping = {
-            'unoptimized-graviton': 'auto-retry-graviton',
-            'unoptimized-x86': 'auto-retry-x86'
-        };
-        return mapping[testType] || null;
-    }
-
     // Enhanced benchmark execution with agent visualization
     async runBenchmarkTest(testType, instanceType) {
         if (this.imageCollection.length === 0) {
@@ -1827,8 +1614,6 @@ ps aux | grep python</pre>
         // Disable all test buttons when starting a benchmark
         this.disableAllTestButtons();
 
-        // Also disable the auto-retry button for this specific test type
-        this.disableAutoRetryButton(testType);
 
         // Set benchmark status immediately to prevent race condition with "Run All Benchmarks"
         this.currentBenchmarkStatus = 'staging';
@@ -1886,6 +1671,7 @@ ps aux | grep python</pre>
                     imageCount: this.imageCollection.length,
                     iterations: iterations,
                     pipelineType: pipelineType,
+                    opencvVersion: (document.querySelector('input[name="opencv-version"]:checked') || {value: '4'}).value,
                     marketplaceLicenseKey: this.getMarketplaceLicenseKey()
                 })
             });
@@ -1947,7 +1733,6 @@ ps aux | grep python</pre>
 
                     // Re-enable buttons
                     this.enableAllTestButtons();
-                    this.enableAutoRetryButton(testType);
 
                     // Reset state
                     this.currentBenchmarkStatus = null;
@@ -2058,7 +1843,6 @@ ps aux | grep python</pre>
 
                     // Always re-enable buttons when a benchmark completes
                     this.enableAllTestButtons();
-                    this.enableAutoRetryButton(testType);
 
                     // Play success sound
                     this.playNotificationSound('success');
@@ -2102,7 +1886,6 @@ ps aux | grep python</pre>
 
                     // Always re-enable buttons when a benchmark fails
                     this.enableAllTestButtons();
-                    this.enableAutoRetryButton(testType);
 
                     // Show error details in communication log
                     const errorMsg = data.error || 'Unknown error';
@@ -2132,8 +1915,6 @@ ps aux | grep python</pre>
                     // Re-enable all test buttons when orchestrator crashes
                     this.enableAllTestButtons();
 
-                    // Re-enable the auto-retry button for this test type
-                    this.enableAutoRetryButton(testType);
 
                     // Play error sound
                     this.playNotificationSound('error');
@@ -2572,9 +2353,6 @@ ps aux | grep python</pre>
                 // Re-enable all test buttons
                 this.enableAllTestButtons();
 
-                // Re-enable all auto-retry buttons
-                this.enableAutoRetryButton('unoptimized-graviton');
-                this.enableAutoRetryButton('unoptimized-x86');
 
                 // Clear all status displays
                 const statusElements = document.querySelectorAll('.result-status');
@@ -2624,280 +2402,11 @@ ps aux | grep python</pre>
         }
     }
 
-    async startAutoRetryBuild(testType, instanceType, buildAttempts = 10) {
-        console.log('=== startAutoRetryBuild called ===', testType, instanceType, 'attempts:', buildAttempts);
-
-        // Auto-select "Build from source" for the appropriate test type
-        if (testType === 'unoptimized-graviton') {
-            const compileRadio = document.querySelector('input[name="graviton-build-mode"][value="compile"]');
-            if (compileRadio) {
-                compileRadio.checked = true;
-                // Trigger change event to update button text
-                compileRadio.dispatchEvent(new Event('change'));
-            }
-        } else if (testType === 'unoptimized-x86') {
-            const compileRadio = document.querySelector('input[name="x86-build-mode"][value="compile"]');
-            if (compileRadio) {
-                compileRadio.checked = true;
-                // Trigger change event to update button text
-                compileRadio.dispatchEvent(new Event('change'));
-            }
-        }
-
-        const confirmed = confirm(
-            '🔄 Auto-Retry EC2 Staging Mode\n\n' +
-            'This will automatically retry the EC2 staging/installation until it succeeds.\n' +
-            'Build mode has been set to "Build from source" for optimization testing.\n' +
-            'No images will be processed - this is for testing the build process only.\n\n' +
-            'The system will:\n' +
-            '• Attempt to install/build OpenCV\n' +
-            '• If it fails, analyze the error logs\n' +
-            '• Automatically retry with fixes\n' +
-            `• Continue until success or max retries (${buildAttempts})\n\n` +
-            'Do you want to proceed?'
-        );
-
-        console.log('=== Confirmation result:', confirmed);
-        if (!confirmed) return;
-
-        // Get the button element
-        const buttonId = testType === 'unoptimized-graviton' ? 'auto-retry-graviton' : 'auto-retry-x86';
-        const button = document.getElementById(buttonId);
-        console.log('=== Button found:', button);
-
-        // Disable button and change appearance
-        if (button) {
-            button.disabled = true;
-            button.style.opacity = '0.5';
-            button.style.cursor = 'not-allowed';
-            button.textContent = '⏳ Auto-Retry Running...';
-        }
-
-        // Get build mode
-        let buildMode = 'pip';
-        if (testType === 'unoptimized-graviton') {
-            const gravitonMode = document.querySelector('input[name="graviton-build-mode"]:checked');
-            buildMode = gravitonMode ? gravitonMode.value : 'pip';
-        } else if (testType === 'unoptimized-x86') {
-            const x86Mode = document.querySelector('input[name="x86-build-mode"]:checked');
-            buildMode = x86Mode ? x86Mode.value : 'pip';
-        }
-        console.log('=== Build mode:', buildMode);
-
-        this.logCommunication(`🔄 Starting auto-retry build for ${testType} (${buildMode} mode)`, 'info');
-        this.logCommunication(`Will retry up to ${buildAttempts} times until installation succeeds`, 'info');
-
-        // Reset tracking variables for Claude analysis/fixes display
-        this.lastShownAnalysis = null;
-        this.lastShownFixes = null;
-
-        const claudeApiKey = this.getClaudeApiKey();
-        console.log('=== Claude API key:', claudeApiKey ? 'present' : 'missing');
-
-        if (!claudeApiKey) {
-            alert('⚠️ Claude API Key not configured!\n\nPlease add your Claude API key in the Configuration section above.');
-            // Re-enable button
-            if (button) {
-                button.disabled = false;
-                button.style.opacity = '1';
-                button.style.cursor = 'pointer';
-                button.textContent = '🔄 Auto-Retry EC2 Staging Until Success';
-            }
-            return;
-        }
-
-        console.log('=== About to make POST request...');
-
-        try {
-            const url = this.getApiUrl('/api/build/auto-retry');
-            console.log('=== POST URL:', url);
-
-            const payload = {
-                testType,
-                instanceType,
-                buildMode,
-                maxRetries: buildAttempts,
-                claudeApiKey
-            };
-            console.log('=== POST payload:', payload);
-
-            const response = await fetch(url, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(payload)
-            });
-
-            console.log('=== Response received:', response.status, response.ok);
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('=== Response error:', errorText);
-                throw new Error('Failed to start auto-retry build: ' + errorText);
-            }
-
-            const responseData = await response.json();
-            console.log('=== Response data:', responseData);
-            const { taskId } = responseData;
-
-            this.logCommunication(`Auto-retry task started: ${taskId}`, 'success');
-
-            // Poll for auto-retry progress
-            console.log('=== Starting polling for task:', taskId);
-            this.pollAutoRetryProgress(taskId, testType, buttonId);
-
-        } catch (error) {
-            console.error('=== ERROR in startAutoRetryBuild:', error);
-            this.logCommunication(`Error: ${error.message}`, 'error');
-            alert('Failed to start auto-retry build: ' + error.message);
-
-            // Re-enable button on error
-            if (button) {
-                button.disabled = false;
-                button.style.opacity = '1';
-                button.style.cursor = 'pointer';
-                button.textContent = '🔄 Auto-Retry EC2 Staging Until Success';
-            }
-        }
-    }
-
-    async pollAutoRetryProgress(taskId, testType, buttonId) {
-        const button = document.getElementById(buttonId);
-
-        const pollInterval = setInterval(async () => {
-            try {
-                const response = await fetch(this.getApiUrl(`/api/build/auto-retry/${taskId}/status`));
-                const data = await response.json();
-
-                if (data.status === 'running') {
-                    // Use total elapsed time since auto-retry started
-                    const totalElapsedMin = data.totalElapsedMinutes || 0;
-
-                    this.logCommunication(
-                        `🔄 Attempt ${data.attempt}/${data.maxRetries}: ${data.currentStep}`,
-                        'info'
-                    );
-
-                    // Show Claude analysis if available (only once per attempt)
-                    if (data.claudeAnalysis && !this.lastShownAnalysis) {
-                        this.logCommunication(
-                            `🤖 Claude AI: ${data.claudeAnalysis}`,
-                            'info'
-                        );
-                        this.lastShownAnalysis = data.claudeAnalysis;
-                    }
-
-                    // Show Claude fixes if available (only once per attempt)
-                    if (data.claudeFixes && data.claudeFixes.length > 0 && !this.lastShownFixes) {
-                        this.logCommunication(
-                            `🔧 Claude suggested ${data.claudeFixes.length} fixes:`,
-                            'info'
-                        );
-                        data.claudeFixes.forEach((fix, idx) => {
-                            this.logCommunication(`   ${idx + 1}. ${fix}`, 'info');
-                        });
-                        this.lastShownFixes = data.claudeFixes;
-                    }
-
-                    // Update button text with current attempt and TOTAL elapsed time
-                    if (button) {
-                        button.textContent = `⏳ Attempt ${data.attempt}/${data.maxRetries} (${totalElapsedMin} min total)`;
-                    }
-
-                    if (data.lastError || data.last_error) {
-                        const errorMsg = data.lastError || data.last_error;
-                        // Show a concise error message
-                        if (errorMsg.length > 100) {
-                            this.logCommunication(`Last error: ${errorMsg.substring(0, 100)}...`, 'error');
-                        } else {
-                            this.logCommunication(`Last error: ${errorMsg}`, 'error');
-                        }
-                    }
-                } else if (data.status === 'success') {
-                    clearInterval(pollInterval);
-
-                    // Format total time
-                    const totalTime = data.totalTimeMinutes !== undefined
-                        ? `${data.totalTimeMinutes}m ${data.totalTimeSeconds}s`
-                        : 'unknown';
-
-                    this.logCommunication(
-                        `✅ Build succeeded after ${data.attempt} attempt(s)!`,
-                        'success'
-                    );
-                    this.logCommunication(
-                        `⏱️ Total time: ${totalTime}`,
-                        'success'
-                    );
-                    this.playNotificationSound('success');
-
-                    // Re-enable button with success state
-                    if (button) {
-                        button.disabled = false;
-                        button.style.opacity = '1';
-                        button.style.cursor = 'pointer';
-                        button.textContent = '✅ Auto-Retry EC2 Staging Until Success';
-
-                        // Reset button text after 3 seconds
-                        setTimeout(() => {
-                            button.textContent = '🔄 Auto-Retry EC2 Staging Until Success';
-                        }, 3000);
-                    }
-                } else if (data.status === 'failed') {
-                    clearInterval(pollInterval);
-
-                    // Format total time
-                    const totalTime = data.total_time_minutes !== undefined
-                        ? `${data.total_time_minutes}m ${data.total_time_seconds}s`
-                        : 'unknown';
-
-                    this.logCommunication(
-                        `❌ Build failed after ${data.max_retries || data.maxRetries || 'unknown'} attempts`,
-                        'error'
-                    );
-                    this.logCommunication(
-                        `⏱️ Total time: ${totalTime}`,
-                        'error'
-                    );
-
-                    // Show detailed error message
-                    const finalError = data.error || data.last_error || 'Unknown error';
-                    if (finalError.length > 150) {
-                        this.logCommunication(`Final error: ${finalError.substring(0, 150)}...`, 'error');
-                        this.logCommunication(`💡 Check browser console or orchestrator logs for full error details`, 'info');
-                    } else {
-                        this.logCommunication(`Final error: ${finalError}`, 'error');
-                    }
-                    this.playNotificationSound('error');
-
-                    // Re-enable button with error state
-                    if (button) {
-                        button.disabled = false;
-                        button.style.opacity = '1';
-                        button.style.cursor = 'pointer';
-                        button.textContent = '❌ Auto-Retry EC2 Staging Until Success';
-
-                        // Reset button text after 3 seconds
-                        setTimeout(() => {
-                            button.textContent = '🔄 Auto-Retry EC2 Staging Until Success';
-                        }, 3000);
-                    }
-                }
-
-            } catch (error) {
-                console.error('Error polling auto-retry progress:', error);
-                // Don't clear interval on network errors, keep trying
-            }
-        }, 3000);
-    }
 
     saveConfiguration() {
-        const claudeApiKey = document.getElementById('claude-api-key').value.trim();
         const marketplaceAmiId = document.getElementById('marketplace-ami-id').value.trim();
 
         const config = {
-            claudeApiKey,
             marketplaceAmiId
         };
 
@@ -2932,9 +2441,6 @@ ps aux | grep python</pre>
             try {
                 const config = JSON.parse(savedConfig);
 
-                if (config.claudeApiKey) {
-                    document.getElementById('claude-api-key').value = config.claudeApiKey;
-                }
                 if (config.marketplaceAmiId) {
                     document.getElementById('marketplace-ami-id').value = config.marketplaceAmiId;
                     // Also update option 1 field
@@ -2974,9 +2480,6 @@ ps aux | grep python</pre>
         console.log('Benchmark results and processed images cleared');
     }
 
-    getClaudeApiKey() {
-        return document.getElementById('claude-api-key').value.trim();
-    }
 
     getMarketplaceAmiId() {
         return document.getElementById('marketplace-ami-id').value.trim();

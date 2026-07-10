@@ -152,7 +152,7 @@ async def _execute_single_benchmark(
                 
                 if task.build_mode in ("pip", "compile"):
                     # Switching from COOL/marketplace → DIY
-                    await reconfigure_mcp_for_diy(instance_id, build_manager)
+                    await reconfigure_mcp_for_diy(instance_id, build_manager, getattr(task, 'opencv_version', '4'))
                 elif task.build_mode == "marketplace":
                     # Switching from DIY → COOL/marketplace
                     await reconfigure_mcp_for_cool(instance_id, build_manager)
@@ -632,7 +632,7 @@ async def _launch_instance(task, ami_id, architecture, instance_manager, build_m
     logger.info(f"🚀 Launching EC2 instance: type={task.instance_type}, ami={ami_id}, arch={architecture}")
     
     # Get user data script based on build mode
-    user_data = build_manager.get_user_data_script(task.build_mode, architecture)
+    user_data = build_manager.get_user_data_script(task.build_mode, architecture, getattr(task, 'opencv_version', '4'))
     
     # Launch instance via instance manager
     instance_id = await instance_manager.launch_instance(

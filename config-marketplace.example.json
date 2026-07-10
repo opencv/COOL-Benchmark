@@ -2,7 +2,7 @@
   "marketplace": {
     "ami_id": "ami-xxxxxxxxxxxxxxxxx",
     "product_code": "your-marketplace-product-code",
-    "license_key": "configured",
+    "license_key": null,
     "license_type": "per_instance",
     "supported_instance_types": [
       "m6g.large",
